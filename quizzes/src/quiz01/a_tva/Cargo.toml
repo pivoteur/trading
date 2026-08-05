@@ -3,6 +3,10 @@ name = "a_tva"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "tva"
+path = "src/main.rs"
+
 [dependencies]
 book = { path = "../../../../../crypto-n-rust/src/libs/book" }
 quizzes = { path = "../../.." }

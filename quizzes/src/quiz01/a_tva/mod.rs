@@ -488,6 +488,20 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
     );
 
+    // The ONLY reliable drain signal: realized gain trending negative.
+    // Raw balance-vs-start (below) swings normally depending on how many
+    // pivots happen to be open in each direction at this exact moment —
+    // that's timing, not loss, and self-corrects as those pivots close.
+    // cum_gain only moves on a real completed round-trip, so it can't be
+    // fooled by which direction currently has more capital mid-flight.
+    if running_stats.total_gain_btc < 0.0 || running_stats.total_gain_undead < 0.0 {
+        println!(
+            "  \u{26A0} WARNING: realized cumulative gain is negative — this is NOT a timing artifact, \
+             closes are actually losing money. BTC {:+.6}   UNDEAD {:+.2}",
+            running_stats.total_gain_btc, running_stats.total_gain_undead
+        );
+    }
+
     // `snap` here is the freshest one taken this cycle — refreshed after
     // each real open, so it's post-action state. In 'dry-run mode' nothing
     // ever actually executes (attempt_trade_with_actual_amount returns
@@ -585,7 +599,8 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, pct: f64
 //============================================================================
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "0.8.0")]
+#[command(bin_name = "tva")]
+#[command(version = "0.10.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
