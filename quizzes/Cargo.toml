@@ -21,8 +21,7 @@ serde_with = "3.0"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 
-libs = { path = "../libs" }
-protocol_libs = { path = "../../protocol/libs", package = "libs" }
+libs = { path = "../../protocol/libs" }
 book = { path = "../../crypto-n-rust/src/libs/book" }
 ethers = { version = "2.0.14", default-features = false, features = ["rustls"] }
 rpassword = "7.5.4"

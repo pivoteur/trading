@@ -497,7 +497,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     let btc_vs_start = snap.btc_balance - STARTING_BTC;
     let undead_vs_start = snap.undead_balance - STARTING_UNDEAD;
     println!(
-        "  Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.6}   UNDEAD {undead_vs_start:+.2}"
+        "Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.6}   UNDEAD {undead_vs_start:+.2}"
     );
 
     // Illustrative split PREVIEW only — no funds move here, nothing is
@@ -510,7 +510,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
         let btc_kept = btc_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
         let btc_sent = btc_vs_start * ILLUSTRATIVE_SKIM_PCT;
         println!(
-            "  Split preview (illustrative, no funds moved) — BTC kept {btc_kept:+.6} ({kept_pct:.0}%) / to {VAULT_ADDRESS} {btc_sent:+.6} ({sent_pct:.0}%)"
+            "  Split preview (illustrative, no funds moved) — BTC kept {btc_kept:+.6} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {btc_sent:+.6}"
         );
     } else {
         println!("  Split preview — BTC: no surplus above starting capital yet ({btc_vs_start:+.6})");
@@ -519,7 +519,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
         let undead_kept = undead_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
         let undead_sent = undead_vs_start * ILLUSTRATIVE_SKIM_PCT;
         println!(
-            "  Split preview (illustrative, no funds moved) — UNDEAD kept {undead_kept:+.2} ({kept_pct:.0}%) / to {VAULT_ADDRESS} {undead_sent:+.2} ({sent_pct:.0}%)"
+            "  Split preview (illustrative, no funds moved) — UNDEAD kept {undead_kept:+.2} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {undead_sent:+.2}"
         );
     } else {
         println!("  Split preview — UNDEAD: no surplus above starting capital yet ({undead_vs_start:+.2})");
