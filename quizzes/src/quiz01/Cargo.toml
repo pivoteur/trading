@@ -1,12 +1,12 @@
 [package]
-name = "a_tva"
+name = "quiz01"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-book = { path = "../../../../../crypto-n-rust/src/libs/book" }
+book = { path = "../../../../crypto-n-rust/src/libs/book" }
 quizzes = { path = "../../.." }
-libs = { path = "../../../../../protocol/libs" }
+libs = { path = "../../../../protocol/libs" }
 
 tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 reqwest  = { version = "0.13.4", features = ["json"] }
