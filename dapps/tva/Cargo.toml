@@ -5,12 +5,13 @@ edition = "2024"
 
 [[bin]]
 name = "tva"
-path = "../../quizzes/src/quiz01/tva/src/main.rs"
+path = "../../quizzes/src/quiz01/a_tva/src/main.rs"
 
 [dependencies]
-quizzes = { path = "../../../protocol/quizzes" }
+quizzes = { path = "../../quizzes" }
 book = { path = "../../../crypto-n-rust/src/libs/book" }
 libs = { path = "../../../protocol/libs" }
+trading = { path = "../../libs" }
 
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 

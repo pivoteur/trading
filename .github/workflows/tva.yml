@@ -34,7 +34,7 @@ jobs:
       - name: Load Shared Environment Variables
         uses: doughepi/yaml-env-action@v1.0.0
         with:
-          files: .github/config/protocol-env.yml
+          files: trading/.github/config/trading-env.yml
 
       - name: Establish app path
         run: echo "DAPP_DIR=$DAPPS_DIR/$DAPP" >> $GITHUB_ENV
@@ -50,7 +50,7 @@ jobs:
           key: >-
             tva-binary-
             ${{ hashFiles(format('{0}/quiz01/a_tva/**/*.rs', env.QUIZZES_SRC)) }}-
-            ${{ hashFiles('libs/src/auto_trading.rs') }}-
+            ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
 
@@ -114,7 +114,6 @@ jobs:
           PROTOCOL_TOKEN: ${{ secrets.PROTOCOL_TOKEN }}
         run: |
           cd trading
-          git remote set-url origin "https://x-access-token:${PROTOCOL_TOKEN}@github.com/pivoteur/protocol.git"
           git config --local user.name "$USER0_NAME"
           git config --local user.email "$USER0_EMAIL"
           git add quizzes/data/tva-trades.log
