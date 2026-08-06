@@ -175,18 +175,42 @@ fn snapshot_and_cumulative_columns(snap: &WalletSnapshot, cum: &CumulativeStats)
     )
 }
 
-fn log_open(pivot_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &WalletSnapshot, cum: &CumulativeStats) {
+/// Every row — OPEN or CLOSE — uses this exact column layout. Only
+/// close_id/gain/roi/apr are ever blank (OPEN doesn't have them yet);
+/// everything else, including prim_amount, is filled on both row types
+/// since it's always known regardless of which kind of row this is.
+fn log_row(
+    kind: &str,
+    pivot_id: u32,
+    close_id: Option<u32>,
+    prim: &str,
+    proper: &str,
+    prim_amount: f64,
+    proper_amount: f64,
+    gain: Option<f64>,
+    roi: Option<f64>,
+    apr: Option<f64>,
+    gas_avax: f64,
+    tx_hash: &str,
+    snap: &WalletSnapshot,
+    cum: &CumulativeStats,
+) {
+    let close_id_s = close_id.map(|v| v.to_string()).unwrap_or_default();
+    let gain_s = gain.map(|v| format!("{v:+.8}")).unwrap_or_default();
+    let roi_s = roi.map(|v| format!("{v:.6}")).unwrap_or_default();
+    let apr_s = apr.map(|v| format!("{v:.6}")).unwrap_or_default();
     append_log(&format!(
-        "{}\tOPEN\t{pivot_id}\t{prim}\t{prim_amount:.8}\t{proper}\t{proper_amount:.8}\t{gas_avax:.8}\t{tx_hash}\t{}",
+        "{}\t{kind}\t{pivot_id}\t{close_id_s}\t{prim}\t{proper}\t{prim_amount:.8}\t{proper_amount:.8}\t{gain_s}\t{roi_s}\t{apr_s}\t{gas_avax:.8}\t{tx_hash}\t{}",
         log_ts(now_ts()), snapshot_and_cumulative_columns(snap, cum)
     ));
 }
 
-fn log_close(pivot_id: u32, close_id: u32, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &WalletSnapshot, cum: &CumulativeStats) {
-    append_log(&format!(
-        "{}\tCLOSE\t{pivot_id}\t{close_id}\t{proper_amount:.8}\t{gain:.8}\t{roi:.6}\t{apr:.6}\t{gas_avax:.8}\t{tx_hash}\t{}",
-        log_ts(now_ts()), snapshot_and_cumulative_columns(snap, cum)
-    ));
+fn log_open(pivot_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &WalletSnapshot, cum: &CumulativeStats) {
+    log_row("OPEN", pivot_id, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
+}
+
+fn log_close(pivot_id: u32, close_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &WalletSnapshot, cum: &CumulativeStats) {
+    log_row("CLOSE", pivot_id, Some(close_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
 }
 
 /// tvá's history predates this program and was wired in deliberately so it hits the ground running.
@@ -196,7 +220,8 @@ fn log_close(pivot_id: u32, close_id: u32, proper_amount: f64, gain: f64, roi: f
 ///
 /// Single pass: builds the still-open pivot list AND the cumulative stats
 /// together, so there's exactly one place that understands the log's
-/// on-disk shape.
+/// on-disk shape. One fixed column layout for both OPEN and CLOSE rows —
+/// see log_row's doc comment for what's where.
 fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)> {
     let file = File::open(path).map_err(|e| format!(
         "Where is tvá's history? Could not open trade log at '{path}': {e}. \
@@ -217,49 +242,53 @@ fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)>
             continue;
         }
         let fields: Vec<&str> = line.split('\t').collect();
-        match fields.get(1) {
-            Some(&"OPEN") => {
-                if fields.len() < 9 {
-                    return Err(format!("malformed OPEN line at {path}:{}: '{line}'", line_no + 1));
-                }
-                let opened_at: u64 = parse_log_ts(fields[0])
-                    .map_err(|e| format!("{e} at {path}:{}: '{line}'", line_no + 1))?;
-                let pivot_id: u32 = fields[2].parse()
-                    .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
-                let prim_amount: f64 = fields[4].parse()
-                    .map_err(|_| format!("bad prim_amount at {path}:{}: '{line}'", line_no + 1))?;
-                let proper_amount: f64 = fields[6].parse()
-                    .map_err(|_| format!("bad proper_amount at {path}:{}: '{line}'", line_no + 1))?;
-                let gas_avax: f64 = fields[7].parse()
-                    .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
+        let kind = *fields.get(1).unwrap_or(&"");
+
+        // Old-format CHECK rows (pre-unification) are tolerated silently
+        // on read; never written going forward.
+        if kind == "CHECK" {
+            continue;
+        }
+
+        if fields.len() < 13 {
+            return Err(format!("malformed line at {path}:{}: too few columns: '{line}'", line_no + 1));
+        }
+        let ts: u64 = parse_log_ts(fields[0])
+            .map_err(|e| format!("{e} at {path}:{}: '{line}'", line_no + 1))?;
+        let pivot_id: u32 = fields[2].parse()
+            .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
+        let prim = fields[4];
+        let proper = fields[5];
+        let prim_amount: f64 = fields[6].parse()
+            .map_err(|_| format!("bad prim_amount at {path}:{}: '{line}'", line_no + 1))?;
+        let proper_amount: f64 = fields[7].parse()
+            .map_err(|_| format!("bad proper_amount at {path}:{}: '{line}'", line_no + 1))?;
+        let gas_avax: f64 = fields[11].parse()
+            .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
+
+        match kind {
+            "OPEN" => {
                 max_pivot_id = max_pivot_id.max(pivot_id);
                 stats.total_opens += 1;
                 stats.total_gas_avax += gas_avax;
                 open_by_id.insert(pivot_id, OpenPivot {
                     pivot_id,
-                    opened_at,
-                    prim: fields[3].to_string(),
+                    opened_at: ts,
+                    prim: prim.to_string(),
                     prim_amount,
-                    proper: fields[5].to_string(),
+                    proper: proper.to_string(),
                     proper_amount,
                 });
             }
-            Some(&"CLOSE") => {
-                if fields.len() < 10 {
-                    return Err(format!("malformed CLOSE line at {path}:{}: '{line}'", line_no + 1));
-                }
-                let pivot_id: u32 = fields[2].parse()
-                    .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
+            "CLOSE" => {
                 let close_id: u32 = fields[3].parse()
                     .map_err(|_| format!("bad close_id at {path}:{}: '{line}'", line_no + 1))?;
-                let gain: f64 = fields[5].parse()
+                let gain: f64 = fields[8].parse()
                     .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;
-                let roi: f64 = fields[6].parse()
+                let roi: f64 = fields[9].parse()
                     .map_err(|_| format!("bad roi at {path}:{}: '{line}'", line_no + 1))?;
-                let apr: f64 = fields[7].parse()
+                let apr: f64 = fields[10].parse()
                     .map_err(|_| format!("bad apr at {path}:{}: '{line}'", line_no + 1))?;
-                let gas_avax: f64 = fields[8].parse()
-                    .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
 
                 let closed_pivot = open_by_id.remove(&pivot_id)
                     .ok_or_else(|| format!(
@@ -278,8 +307,7 @@ fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)>
                     other => eprintln!("Warning: CLOSE for pivot #{pivot_id} has unrecognized prim '{other}' — gain not added to either cumulative bucket"),
                 }
             }
-            Some(&"CHECK") => {}
-            _ => return Err(format!("unrecognized log line at {path}:{}: '{line}'", line_no + 1)),
+            other => return Err(format!("unrecognized log line type '{other}' at {path}:{}: '{line}'", line_no + 1)),
         }
     }
 
@@ -396,7 +424,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
                 }
 
                 let snap = wallet_snapshot(&wallet_address, &registry, committed_btc, committed_undead).await?;
-                log_close(pivot.pivot_id, next_close_id, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
+                log_close(pivot.pivot_id, next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
                 next_close_id += 1;
                 closed_something = true;
             }
@@ -606,7 +634,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, pct: f64
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.11.0")]
+#[command(version = "0.12.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -675,8 +703,8 @@ mod unit_tests {
         let path_str = path.to_str().unwrap();
         std::fs::write(
             &path,
-            "1970-01-01 00:16:40\tOPEN\t1\tUNDEAD\t500000.00000000\tBTC\t0.00502601\t0.00500000\t0xabc\n\
-             1970-01-01 00:33:20\tCLOSE\t1\t1\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
+            "1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
+             1970-01-01 00:33:20\tCLOSE\t1\t1\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
         ).map_err(|e| format!("could not write test fixture: {e}"))?;
 
         let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
@@ -699,8 +727,8 @@ mod unit_tests {
         let path_str = path.to_str().unwrap();
         std::fs::write(
             &path,
-            "1970-01-01 00:16:40\tOPEN\t1\tUNDEAD\t500000.00000000\tBTC\t0.00502601\t0.00500000\t0xabc\n\
-             1970-01-01 00:16:40\tOPEN\t2\tBTC\t0.00500000\tUNDEAD\t487122.54000000\t0.00300000\t0xdef\n\
+            "1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
+             1970-01-01 00:16:40\tOPEN\t2\t\tBTC\tUNDEAD\t0.00500000\t487122.54000000\t\t\t\t0.00300000\t0xdef\n\
              1970-01-01 00:33:20\tCHECK\t1\tnot_closed\n",
         ).map_err(|e| format!("could not write test fixture: {e}"))?;
 
@@ -728,7 +756,7 @@ mod unit_tests {
         let path = std::env::temp_dir().join("tva_test_orphan_close.log");
         std::fs::write(
             &path,
-            "2000\tCLOSE\t99\t1\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
+            "2026-01-01 00:00:00\tCLOSE\t99\t1\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
         ).unwrap();
         let result = replay_log(path.to_str().unwrap());
         assert!(result.is_err(), "a CLOSE referencing a pivot_id with no prior OPEN should be a hard error, not silently ignored");
