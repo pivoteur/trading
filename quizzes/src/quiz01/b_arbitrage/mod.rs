@@ -10,12 +10,12 @@ use book::{
 use libs::{
     fetchers::calls::fetch_calls,
     types::calls::Call,
-    auto_trading::{
-        TokenRegistry, parse_token_registry, token_entry,
-        wallet_address_from_env, wallet_balance, live_quote, execute_trade,
-    },
 };
 
+use trading::auto_trading::{
+    TokenRegistry, parse_token_registry, token_entry,
+    wallet_address_from_env, wallet_balance, live_quote, execute_trade,
+};
 
 //============================================================================
 //----- Token Registry --------------------------------------------------------

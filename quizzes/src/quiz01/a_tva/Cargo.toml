@@ -11,6 +11,7 @@ path = "src/main.rs"
 book = { path = "../../../../../crypto-n-rust/src/libs/book" }
 quizzes = { path = "../../.." }
 libs = { path = "../../../../../protocol/libs" }
+trading = { path = "../../../../libs" }
 
 tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 reqwest  = { version = "0.13.4", features = ["json"] }

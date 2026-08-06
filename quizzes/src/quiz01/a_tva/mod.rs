@@ -9,7 +9,7 @@ use book::{
         err_utils::ErrStr,
         parse_args_add_banner,
 };
-use libs::auto_trading::{
+use trading::auto_trading::{
             TokenRegistry, 
             parse_token_registry, 
             wallet_address_from_env,
@@ -166,13 +166,14 @@ fn append_log(line: &str) {
 }
 
 fn snapshot_and_cumulative_columns(snap: &WalletSnapshot, cum: &CumulativeStats) -> String {
-    format!(
+    let ans = format!(
         "{:.8}\t{:.8}\t{:.8}\t{:.2}\t{:.2}\t{:.2}\t{:+.8}\t{:+.2}\t{:.8}\t{:.6}\t{:.6}",
         snap.btc_balance, snap.btc_committed, snap.btc_available,
         snap.undead_balance, snap.undead_committed, snap.undead_available,
         cum.total_gain_btc, cum.total_gain_undead, cum.total_gas_avax,
         cum.avg_roi(), cum.avg_apr(),
-    )
+    );
+    ans
 }
 
 /// Every row — OPEN or CLOSE — uses this exact column layout. Only
