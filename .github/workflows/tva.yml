@@ -1,0 +1,128 @@
+name: tva
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no funds moved, no log entries written)?'
+        type: boolean
+        default: true
+  # Uncomment once you're confident in manual runs
+  # schedule:
+  #   - cron: "0 * * * *"
+
+env:
+  DAPP: tva
+
+permissions:
+  contents: write
+
+jobs:
+  run-tva:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout pivoteur.github.io
+        uses: actions/checkout@v4
+
+      - name: Checkout protocol
+        uses: actions/checkout@v4
+        with:
+          repository: pivoteur/protocol
+          path: protocol
+
+      - name: Load Shared Environment Variables
+        uses: doughepi/yaml-env-action@v1.0.0
+        with:
+          files: .github/config/protocol-env.yml
+
+      - name: Establish app path
+        run: echo "DAPP_DIR=$DAPPS_DIR/$DAPP" >> $GITHUB_ENV
+
+      - name: Establish git path
+        run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
+
+      - name: Cache tva binary
+        id: binary-cache
+        uses: actions/cache@v4
+        with:
+          path: trading/dapps/tva/target/release/tva
+          key: >-
+            tva-binary-
+            ${{ hashFiles(format('{0}/quiz01/a_tva/**/*.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles('libs/src/auto_trading.rs') }}-
+            ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
+            ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
+
+      - name: Install Rust toolchain
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout crypto-n-rust
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: logicalgraphs/crypto-n-rust
+          path: crypto-n-rust
+
+      - name: Show input parameters
+        run: |
+          echo "=== Running tva with manual inputs ==="
+          echo "dry_run: ${{ inputs.dry_run }}"
+
+      - name: Build tva
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --manifest-path $DAPP_DIR/Cargo.toml --bin $DAPP --release
+
+      - name: Add tva to PATH
+        run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
+
+      - name: Write keystore file from secret
+        env:
+          TVA_KEYSTORE_JSON: ${{ secrets.TVA_KEYSTORE_JSON }}
+        run: |
+          echo "$TVA_KEYSTORE_JSON" > "$RUNNER_TEMP/tva-keystore.json"
+          echo "TVA_KEYSTORE_PATH=$RUNNER_TEMP/tva-keystore.json" >> $GITHUB_ENV
+
+      - name: Run tva
+        env:
+          TVA_WALLET_ADDRESS:  ${{ secrets.TVA_WALLET_ADDRESS }}
+          KEYSTORE_PASSWORD:   ${{ secrets.TVA_KEYSTORE_PASSWORD }}
+        run: |
+          # github.event.inputs is only populated on workflow_dispatch — it's
+          # empty on schedule (or any other trigger). Defaulting to dry-run
+          # unless dry_run is explicitly the string "false" means an
+          # unfamiliar/scheduled trigger path fails safe, not live.
+          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            $DAPP
+          else
+            $DAPP --dry-run
+          fi
+
+      - name: Delete keystore file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tva-keystore.json"
+
+      - name: Commit trade log to protocol
+        if: ${{ github.event.inputs.dry_run == 'false' }}
+        env:
+          USER0_NAME:     ${{ vars.USER0_NAME }}
+          USER0_EMAIL:    ${{ secrets.USER0_EMAIL }}
+          PROTOCOL_TOKEN: ${{ secrets.PROTOCOL_TOKEN }}
+        run: |
+          cd trading
+          git remote set-url origin "https://x-access-token:${PROTOCOL_TOKEN}@github.com/pivoteur/protocol.git"
+          git config --local user.name "$USER0_NAME"
+          git config --local user.email "$USER0_EMAIL"
+          git add quizzes/data/tva-trades.log
+
+          if git diff --staged --quiet; then
+            echo "Nothing to commit, skipping push"
+            exit 0
+          fi
+
+          git commit -m "tva trade log update [skip ci]"
+          git push
