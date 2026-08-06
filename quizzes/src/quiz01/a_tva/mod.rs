@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Local, Utc};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory};
 use book::{
         cli_utils::generate_banner,
         err_utils::ErrStr,
@@ -347,7 +347,10 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     let open_pivots = biggest_first(open_pivots);
 
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
+    println!();
+    println!("tva {}", Args::command().get_version().unwrap_or("unknown"));
     println!("tvá — {}{mode_tag} — {} open pivot(s), wallet {wallet_address}", human_ts(now_ts()), open_pivots.len());
+    println!();
 
     // Committed amounts, tracked incrementally through the cycle rather than
     // recomputed from a pivot list each time: start at the full committed
@@ -401,7 +404,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
                 let gain = quoted_amount_out - pivot.prim_amount;
                 let roi = gain / pivot.prim_amount;
                 println!(
-                    "  WOULD CLOSE  #{:<4} {:.4} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
+                    "  WOULD CLOSE  #{:<4} {:.8} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
                     pivot.pivot_id, pivot.proper_amount, pivot.proper, quoted_amount_out, pivot.prim,
                     gain, pivot.prim, roi * 100.0
                 );
@@ -419,10 +422,12 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     }
 
     let mut snap = wallet_snapshot(&wallet_address, &registry, committed_btc, committed_undead).await?;
+    println!();
     println!(
         "Wallet's Status = BTC {:.6} in wallet ({:.6} committed, {:.6} available) | UNDEAD {:.2} in wallet ({:.2} committed, {:.2} available)",
         snap.btc_balance, snap.btc_committed, snap.btc_available, snap.undead_balance, snap.undead_committed, snap.undead_available
     );
+    println!();
 
     let mut opened_something = false;
     let mut skipped_open_reasons: Vec<String> = Vec::new();
@@ -433,7 +438,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
             &wallet_address, &registry, "BTC", "UNDEAD", BTC_TRADE_AMOUNT, NO_REAL_FLOOR, dry_run,
         ).await {
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
-                println!("  OPENED  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.4} BTC -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
+                println!("  OPENED  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
                 committed_undead += actual_received;
                 running_stats.total_opens += 1;
                 running_stats.total_gas_avax += gas_avax;
@@ -442,7 +447,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
                 opened_something = true;
             }
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.4} BTC -> ~{quoted_amount_out:.2} UNDEAD   (dry run, no funds moved)");
+                println!("  WOULD OPEN  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> ~{quoted_amount_out:.2} UNDEAD   (dry run, no funds moved)");
                 opened_something = true;
             }
             Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: BTC->UNDEAD open quote didn't clear the near-zero floor — check the pool."),
@@ -458,7 +463,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
             &wallet_address, &registry, "UNDEAD", "BTC", UNDEAD_TRADE_AMOUNT, NO_REAL_FLOOR, dry_run,
         ).await {
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
-                println!("  OPENED  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> {actual_received:.6} BTC   gas {gas_avax:.5} AVAX");
+                println!("  OPENED  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> {actual_received:.8} BTC   gas {gas_avax:.5} AVAX");
                 committed_btc += actual_received;
                 running_stats.total_opens += 1;
                 running_stats.total_gas_avax += gas_avax;
@@ -467,7 +472,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
                 opened_something = true;
             }
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> ~{quoted_amount_out:.6} BTC   (dry run, no funds moved)");
+                println!("  WOULD OPEN  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> ~{quoted_amount_out:.8} BTC   (dry run, no funds moved)");
                 opened_something = true;
             }
             Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: UNDEAD->BTC open quote didn't clear the near-zero floor — check the pool."),
@@ -480,14 +485,14 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     if !opened_something {
         println!("  Nothing to open this cycle ({}) — see ya in an hour!", skipped_open_reasons.join("; "));
     }
-
+    println!();
     println!(
-        "  Totals   {} closes, {} opens   gain BTC {:+.6}   gain UNDEAD {:+.2}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.1}%",
+        "Totals = {} closes, {} opens   gain BTC {:+.8}   gain UNDEAD {:+.4}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
         running_stats.total_closes, running_stats.total_opens,
         running_stats.total_gain_btc, running_stats.total_gain_undead, running_stats.total_gas_avax,
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
     );
-
+    println!();
     // The ONLY reliable drain signal: realized gain trending negative.
     // Raw balance-vs-start (below) swings normally depending on how many
     // pivots happen to be open in each direction at this exact moment —
@@ -497,7 +502,7 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     if running_stats.total_gain_btc < 0.0 || running_stats.total_gain_undead < 0.0 {
         println!(
             "  \u{26A0} WARNING: realized cumulative gain is negative — this is NOT a timing artifact, \
-             closes are actually losing money. BTC {:+.6}   UNDEAD {:+.2}",
+             closes are actually losing money. BTC {:+.8}   UNDEAD {:+.4}",
             running_stats.total_gain_btc, running_stats.total_gain_undead
         );
     }
@@ -511,8 +516,9 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
     let btc_vs_start = snap.btc_balance - STARTING_BTC;
     let undead_vs_start = snap.undead_balance - STARTING_UNDEAD;
     println!(
-        "Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.6}   UNDEAD {undead_vs_start:+.2}"
+        "Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.8}   UNDEAD {undead_vs_start:+.4}"
     );
+    println!();
 
     // Illustrative split PREVIEW only — no funds move here, nothing is
     // sent anywhere. Just shows what an even split of today's surplus
@@ -524,19 +530,19 @@ pub async fn run_cycle(dry_run: bool) -> ErrStr<WalletSnapshot> {
         let btc_kept = btc_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
         let btc_sent = btc_vs_start * ILLUSTRATIVE_SKIM_PCT;
         println!(
-            "  Split preview (illustrative, no funds moved) — BTC kept {btc_kept:+.6} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {btc_sent:+.6}"
+            "  Split preview (illustrative, no funds moved) — BTC kept {btc_kept:+.8} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {btc_sent:+.8}"
         );
     } else {
-        println!("  Split preview — BTC: no surplus above starting capital yet ({btc_vs_start:+.6})");
+        println!("  Split preview — BTC: no surplus above starting capital yet ({btc_vs_start:+.8})");
     }
     if undead_vs_start > 0.0 {
         let undead_kept = undead_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
         let undead_sent = undead_vs_start * ILLUSTRATIVE_SKIM_PCT;
         println!(
-            "  Split preview (illustrative, no funds moved) — UNDEAD kept {undead_kept:+.2} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {undead_sent:+.2}"
+            "  Split preview (illustrative, no funds moved) — UNDEAD kept {undead_kept:+.4} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {undead_sent:+.4}"
         );
     } else {
-        println!("  Split preview — UNDEAD: no surplus above starting capital yet ({undead_vs_start:+.2})");
+        println!("  Split preview — UNDEAD: no surplus above starting capital yet ({undead_vs_start:+.4})");
     }
 
     Ok(snap)
@@ -575,7 +581,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, pct: f64
 
     println!("  div: {pct:.1}% of sendable surplus -> Vault ({VAULT_ADDRESS})");
     println!("    BTC    sendable {:.8}   sending {btc_to_send:.8}", snap.btc_available.min((snap.btc_balance - STARTING_BTC).max(0.0)));
-    println!("    UNDEAD sendable {:.2}   sending {undead_to_send:.2}", snap.undead_available.min((snap.undead_balance - STARTING_UNDEAD).max(0.0)));
+    println!("    UNDEAD sendable {:.4}   sending {undead_to_send:.4}", snap.undead_available.min((snap.undead_balance - STARTING_UNDEAD).max(0.0)));
 
     if btc_to_send <= 0.0 && undead_to_send <= 0.0 {
         println!("  Nothing sendable right now (no surplus, or it's all committed to open pivots) — no transfer made.");
@@ -588,7 +594,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, pct: f64
     }
     if undead_to_send > 0.0 {
         let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, "UNDEAD", VAULT_ADDRESS, undead_to_send, "TVA_KEYSTORE_PATH").await?;
-        println!("  Sent {undead_to_send:.2} UNDEAD to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
+        println!("  Sent {undead_to_send:.4} UNDEAD to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
     }
 
     Ok(())
@@ -600,7 +606,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, pct: f64
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.10.0")]
+#[command(version = "0.11.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
