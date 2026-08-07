@@ -135,7 +135,7 @@ async fn run_trade_for_symbols(
 
     println!(">>> Quote clears your floor. Proceeding to execute.");
 
-    match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, "KEYSTORE_PATH").await {
+    match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, "KEYSTORE_PATH", true).await {
         Ok((tx_hash, _gas_avax)) => {
             // gas tracking isn't part of arbitrage's log format (yet) —
             // available here if that changes later.
@@ -228,7 +228,7 @@ enum Command {
 
 #[derive(Debug, Parser)]
 #[command(name = "arbitrage")]
-#[command(version = "0.10.1")]
+#[command(version = "0.11.0")]
 struct Args {
     #[command(subcommand)]
     command: Command,

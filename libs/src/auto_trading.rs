@@ -296,6 +296,7 @@ pub async fn approve_exact_amount(
     token_contract: &str,
     spender: &str,
     amount_base_units: u128,
+    verbose: bool,
 ) -> ErrStr<f64> {
     let data_hex = format!(
         "0x095ea7b3{}{}",
@@ -310,14 +311,18 @@ pub async fn approve_exact_amount(
         .send_transaction(tx, None)
         .await
         .map_err(|e| format!("Approve transaction failed to send: {e}"))?;
-    println!("    Approve tx submitted: {:?}", pending.tx_hash());
+    if verbose {
+        println!("    Approve tx submitted: {:?}", pending.tx_hash());
+    }
 
     let receipt = pending
         .await
         .map_err(|e| format!("Approve transaction failed while confirming: {e}"))?;
     match receipt {
         Some(r) => {
-            println!("    Approve confirmed in block {:?}", r.block_number);
+            if verbose {
+                println!("    Approve confirmed in block {:?}", r.block_number);
+            }
             Ok(gas_cost_avax(r.gas_used, r.effective_gas_price))
         }
         None => Err("Approve transaction was dropped or replaced".to_string()),
@@ -325,12 +330,15 @@ pub async fn approve_exact_amount(
 }
 
 /// Asks KyberSwap to encode the actual swap calldata for the route.
-/// Prints the raw response every time — verify it before trusting it.
-/// `slippage_bps` is basis points (e.g. 50 = 0.50%).
+/// When `verbose`, prints the raw response so it can be eyeballed before
+/// trusting it — otherwise that's a screen-filling blob of hex calldata,
+/// so it stays silent by default. `slippage_bps` is basis points (e.g.
+/// 50 = 0.50%).
 pub async fn kyberswap_build(
     route_summary_raw: &serde_json::Value,
     sender: &str,
     slippage_bps: u16,
+    verbose: bool,
 ) -> ErrStr<(String, String)> {
     let body = serde_json::json!({
         "routeSummary": route_summary_raw,
@@ -351,7 +359,9 @@ pub async fn kyberswap_build(
 
     let status = resp.status();
     let raw_body = resp.text().await.map_err(|e| format!("Could not read build response: {e}"))?;
-    println!("    KyberSwap build response (verify this looks right):\n    {raw_body}");
+    if verbose {
+        println!("    KyberSwap build response (verify this looks right):\n    {raw_body}");
+    }
 
     let parsed: serde_json::Value = serde_json::from_str(&raw_body).map_err(|e| {
         format!("KyberSwap build response did not parse (HTTP {status}): {e}\nRaw body: {raw_body}")
@@ -380,6 +390,7 @@ pub async fn send_swap_tx(
     client: &SignerMiddleware<Provider<Http>, LocalWallet>,
     router: &str,
     calldata_hex: &str,
+    verbose: bool,
 ) -> ErrStr<(String, f64)> {
     let to = Address::from_str(router).map_err(|e| format!("Bad router address: {e}"))?;
     let data = Bytes::from_str(calldata_hex).map_err(|e| format!("Bad calldata from KyberSwap: {e}"))?;
@@ -390,14 +401,18 @@ pub async fn send_swap_tx(
         .await
         .map_err(|e| format!("Swap transaction failed to send: {e}"))?;
     let tx_hash = format!("{:?}", pending.tx_hash());
-    println!("    Swap tx submitted: {tx_hash}");
+    if verbose {
+        println!("    Swap tx submitted: {tx_hash}");
+    }
 
     let receipt = pending
         .await
         .map_err(|e| format!("Swap transaction failed while confirming: {e}"))?;
     match receipt {
         Some(r) if r.status == Some(1.into()) => {
-            println!("    Swap confirmed in block {:?}", r.block_number);
+            if verbose {
+                println!("    Swap confirmed in block {:?}", r.block_number);
+            }
             Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
         }
         Some(_) => Err(format!("Swap transaction REVERTED on-chain. Hash: {tx_hash}")),
@@ -418,6 +433,7 @@ pub async fn send_tokens(
     to_address: &str,
     amount: f64,
     keystore_path_var: &str,
+    verbose: bool,
 ) -> ErrStr<(String, f64)> {
     if amount <= 0.0 {
         return Err(format!("send_tokens: amount must be positive, got {amount}"));
@@ -444,19 +460,27 @@ pub async fn send_tokens(
     let data = Bytes::from_str(&data_hex).map_err(|e| format!("Bad transfer calldata: {e}"))?;
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
 
+    if !verbose {
+        println!("    On its way to the vault — courier's en route...");
+    }
+
     let pending = client
         .send_transaction(tx, None)
         .await
         .map_err(|e| format!("Transfer transaction failed to send: {e}"))?;
     let tx_hash = format!("{:?}", pending.tx_hash());
-    println!("    Transfer tx submitted: {tx_hash}");
+    if verbose {
+        println!("    Transfer tx submitted: {tx_hash}");
+    }
 
     let receipt = pending
         .await
         .map_err(|e| format!("Transfer transaction failed while confirming: {e}"))?;
     match receipt {
         Some(r) if r.status == Some(1.into()) => {
-            println!("    Transfer confirmed in block {:?}", r.block_number);
+            if verbose {
+                println!("    Transfer confirmed in block {:?}", r.block_number);
+            }
             Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
         }
         Some(_) => Err(format!("Transfer transaction REVERTED on-chain. Hash: {tx_hash}")),
@@ -504,15 +528,23 @@ pub async fn execute_trade(
     min_floor: f64,
     slippage_bps: u16,
     keystore_path_var: &str,
+    verbose: bool,
 ) -> ErrStr<(String, f64)> {
     let signer = load_signer(wallet_address, keystore_path_var).await?;
     let provider = Provider::<Http>::try_from(AVALANCHE_RPC)
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
 
-    println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
+    if !verbose {
+        println!("  Trading in progress — approve, quote, swap. This part takes a minute...");
+    }
+    if verbose {
+        println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
+    }
     let fresh_quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
-    println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
+    if verbose {
+        println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
+    }
     if fresh_quote.amount_out < min_floor {
         return Err(format!(
             "Quote moved below your floor while unlocking the keystore ({:.8} {to_symbol} < {min_floor:.8} {to_symbol}). \
@@ -525,15 +557,21 @@ pub async fn execute_trade(
     let from_addr = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?.to_string();
     let amount_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
 
-    println!(">>> Approving exact amount ({amount:.6} {from_symbol}) for the router...");
-    let approve_gas = approve_exact_amount(&client, &from_addr, &fresh_quote.router_address, amount_base).await?;
+    if verbose {
+        println!(">>> Approving exact amount ({amount:.6} {from_symbol}) for the router...");
+    }
+    let approve_gas = approve_exact_amount(&client, &from_addr, &fresh_quote.router_address, amount_base, verbose).await?;
 
-    println!(">>> Requesting swap calldata from KyberSwap...");
+    if verbose {
+        println!(">>> Requesting swap calldata from KyberSwap...");
+    }
     let (router, calldata) =
-        kyberswap_build(&fresh_quote.route_summary_raw, wallet_address, slippage_bps).await?;
+        kyberswap_build(&fresh_quote.route_summary_raw, wallet_address, slippage_bps, verbose).await?;
 
-    println!(">>> Sending swap transaction...");
-    let (tx_hash, swap_gas) = send_swap_tx(&client, &router, &calldata).await?;
+    if verbose {
+        println!(">>> Sending swap transaction...");
+    }
+    let (tx_hash, swap_gas) = send_swap_tx(&client, &router, &calldata, verbose).await?;
 
     Ok((tx_hash, approve_gas + swap_gas))
 }
