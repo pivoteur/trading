@@ -15,7 +15,7 @@ use libs::{
 use trading::auto_trading::{
                 TokenRegistry, parse_token_registry, token_entry,
                 wallet_address_from_env, wallet_balance, live_quote, execute_trade,
-                balance_snapshot,
+                balance_snapshot, BalanceSnapshot,
                 AttemptOutcome, attempt_trade_with_actual_amount,
                 biggest_first, now_ts, replay_log, log_open, log_close,
                 UNDEAD, NO_REAL_FLOOR,
@@ -102,6 +102,10 @@ fn open_trade_amount(_token: &str) -> Option<f64> {
 struct PoolCycleResult {
     closed_something: bool,
     opened_something: bool,
+    /// This pool's final balance/committed/available state for this cycle
+    /// — feeds the wallet-health table `run_survey` prints at the end, at
+    /// no extra cost to the caller since it's fetched here regardless.
+    health: BalanceSnapshot,
 }
 // -----
 async fn run_pool_cycle(
@@ -197,7 +201,13 @@ async fn run_pool_cycle(
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
     );
 
-    Ok(PoolCycleResult { closed_something, opened_something: false })
+    // Fresh read for the wallet-health table: committed_token/committed_undead
+    // reflect this cycle's closes, so this is the pool's true post-cycle
+    // state — not whatever the last pivot happened to snapshot, which is
+    // absent entirely on a cycle where nothing closed.
+    let health = balance_snapshot(wallet_address, registry, token, committed_token, committed_undead).await?;
+
+    Ok(PoolCycleResult { closed_something, opened_something: false, health })
 }
 
 /// No subcommand = the default full survey: walk every pool that has an
@@ -215,11 +225,11 @@ pub async fn run_survey(dry_run: bool, debug: bool) -> ErrStr<()> {
     let pools = discover_pools()?;
     if pools.is_empty() {
         println!("No pools opened yet — run `arbitrage new <TOKEN> <amount>` to bootstrap one.");
-        return Ok(());
     }
 
     let mut any_closed = false;
     let mut any_opened = false;
+    let mut healths: Vec<(String, BalanceSnapshot)> = Vec::new();
     for token in &pools {
         if token_entry(&registry, token).is_err() {
             println!();
@@ -230,11 +240,87 @@ pub async fn run_survey(dry_run: bool, debug: bool) -> ErrStr<()> {
         let result = run_pool_cycle(&wallet_address, &registry, token, dry_run, debug).await?;
         any_closed |= result.closed_something;
         any_opened |= result.opened_something;
+        healths.push((token.clone(), result.health));
     }
 
+    if !pools.is_empty() {
+        println!();
+        if !any_closed && !any_opened {
+            println!("Nothing to close or open across {} pool(s) this cycle — see ya next time!", pools.len());
+        }
+    }
+
+    // Always printed — even (especially) with zero pools open, since that's
+    // exactly when "what do I have available to bootstrap a pool with?" is
+    // the most useful question to answer.
+    print_wallet_health(&wallet_address, &registry, &healths).await?;
+
+    Ok(())
+}
+
+//============================================================================
+//----- Wallet Health: default-survey summary table ------------------------
+//============================================================================
+/// Printed automatically as the last thing `run_survey` does — read-only,
+/// always shown whether or not `--dry-run` is set, since nothing here
+/// touches the keystore or sends a tx. Bootstrapped pools get their full
+/// balance/committed/available breakdown (already fetched this cycle
+/// inside `run_pool_cycle`, so this costs nothing extra); every other
+/// tokens.toml entry gets a plain balance-only read since there's no pool
+/// to commit against yet. UNDEAD is the one asset every pool draws from,
+/// so instead of repeating its balance once per pool (same number, just
+/// different committed/available each time) it collapses into a single
+/// totals line — that's the number that actually answers "how much is
+/// available for everything wired into arbitrage."
+async fn print_wallet_health(
+    wallet_address: &str,
+    registry: &TokenRegistry,
+    pool_healths: &[(String, BalanceSnapshot)],
+) -> ErrStr<()> {
     println!();
-    if !any_closed && !any_opened {
-        println!("Nothing to close or open across {} pool(s) this cycle — see ya next time!", pools.len());
+    println!("== Wallet Health ==");
+
+    for (token, snap) in pool_healths {
+        println!(
+            "  {:<8} balance {:.6}   committed {:.6}   available {:.6}",
+            token, snap.asset_balance, snap.asset_committed, snap.asset_available
+        );
+    }
+
+    let pool_tokens: std::collections::HashSet<&str> =
+        pool_healths.iter().map(|(t, _)| t.as_str()).collect();
+    let mut other_tokens: Vec<&str> = registry
+        .keys()
+        .map(|s| s.as_str())
+        .filter(|s| *s != UNDEAD && !pool_tokens.contains(s))
+        .collect();
+    other_tokens.sort();
+
+    for token in &other_tokens {
+        let balance = wallet_balance(wallet_address, token, registry).await?;
+        println!("  {:<8} balance {:.6}   (not yet bootstrapped into a pool)", token, balance);
+    }
+
+    println!("  --");
+    if !pool_healths.is_empty() {
+        let undead_balance = pool_healths[0].1.undead_balance;
+        let total_committed: f64 = pool_healths.iter().map(|(_, s)| s.undead_committed).sum();
+        println!(
+            "  {:<8} balance {:.6}   total committed {:.6} (across {} pool{})   available {:.6}",
+            UNDEAD, undead_balance, total_committed, pool_healths.len(),
+            if pool_healths.len() == 1 { "" } else { "s" },
+            undead_balance - total_committed
+        );
+    } else {
+        // No pools yet means nothing's committed anywhere — still show the
+        // real UNDEAD balance so "what's available to bootstrap with" has
+        // an actual answer instead of UNDEAD silently vanishing from the
+        // table entirely.
+        let undead_balance = wallet_balance(wallet_address, UNDEAD, registry).await?;
+        println!(
+            "  {:<8} balance {:.6}   (no pools open yet — nothing committed)",
+            UNDEAD, undead_balance
+        );
     }
 
     Ok(())
@@ -546,7 +632,7 @@ enum Command {
 
 #[derive(Debug, Parser)]
 #[command(name = "arbitrage")]
-#[command(version = "0.13.0")]
+#[command(version = "0.14.0")]
 struct Args {
     /// No subcommand = full survey: walk every existing pool's log and
     /// close what's ready to close.

@@ -143,17 +143,34 @@ async fn erc20_balance(wallet_address: &str, token_contract: &str) -> ErrStr<u12
     hex_to_u128(&result)
 }
 
+/// Native-coin balance (AVAX itself, not a wrapped ERC-20) via the plain
+/// `eth_getBalance` RPC method — no contract call, no `address` needed in
+/// tokens.toml. `wallet_balance` below dispatches here automatically for
+/// any registry entry marked `native = true`.
+async fn native_coin_balance(wallet_address: &str) -> ErrStr<u128> {
+    let result = rpc_call(
+        "eth_getBalance",
+        serde_json::json!([wallet_address, "latest"]),
+    )
+    .await?;
+    hex_to_u128(&result)
+}
+
 pub async fn wallet_balance(
     wallet_address: &str,
     symbol: &str,
     registry: &TokenRegistry,
 ) -> ErrStr<f64> {
     let entry = token_entry(registry, symbol)?;
-    let addr = entry
-        .address
-        .as_deref()
-        .ok_or_else(|| format!("'{symbol}' has no address in tokens.toml (or is native — not supported by this helper)"))?;
-    let raw = erc20_balance(wallet_address, addr).await?;
+    let raw = if entry.native {
+        native_coin_balance(wallet_address).await?
+    } else {
+        let addr = entry
+            .address
+            .as_deref()
+            .ok_or_else(|| format!("'{symbol}' is not marked native and has no address in tokens.toml — add one or set native = true"))?;
+        erc20_balance(wallet_address, addr).await?
+    };
     Ok(raw as f64 / 10f64.powi(entry.decimals as i32))
 }
 
