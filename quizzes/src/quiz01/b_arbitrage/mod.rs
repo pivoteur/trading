@@ -1,23 +1,24 @@
-use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use book::{
         cli_utils::generate_banner,
         err_utils::ErrStr,
-        file_utils::lines_from_file,
         parse_args_add_banner,
 };
 use libs::{
-    fetchers::calls::fetch_calls,
-    types::calls::Call,
+        fetchers::calls::fetch_calls,
+        types::calls::Call,
 };
 use trading::auto_trading::{
-    TokenRegistry, parse_token_registry, token_entry,
-    wallet_address_from_env, wallet_balance, live_quote, execute_trade,
+                TokenRegistry, parse_token_registry, token_entry,
+                wallet_address_from_env, wallet_balance, live_quote, execute_trade,
+                balance_snapshot,
+                AttemptOutcome, attempt_trade_with_actual_amount,
+                biggest_first, now_ts, replay_log, log_open, log_close,
+                UNDEAD, NO_REAL_FLOOR,
 };
 
 //============================================================================
@@ -34,16 +35,14 @@ pub fn load_token_registry() -> ErrStr<TokenRegistry> {
 //============================================================================
 //----- Constants ---------------------------------------------------------------
 //============================================================================
-const UNDEAD: &str = "UNDEAD";
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
-/// Used for opening pivots, where there's no real floor to enforce yet —
-/// same convention tvá uses (a near-zero floor means "accept whatever the
-/// live quote is," while still routing through the same clear-a-floor
-/// codepath as every other trade, rather than a separate unchecked path).
-const NO_REAL_FLOOR: f64 = 0.000_000_01;
+/// Env var holding the path to arbitrage's own encrypted keystore file —
+/// kept as one named constant rather than repeating the literal at each
+/// call site.
+const KEYSTORE_PATH_VAR: &str = "KEYSTORE_PATH";
 
 //============================================================================
-//----- Per-Pool Trade Log — path, format, replay -------------------------------
+//----- Per-Pool Trade Log — path & header --------------------------------------
 //============================================================================
 /// Every pool gets its own log file, named after its non-UNDEAD token,
 /// living alongside this binary's other data — e.g.
@@ -60,249 +59,7 @@ fn pool_log_path(token: &str) -> String {
     ans
 }
 
-const LOG_HEADER: &str = "timestamp\tkind\tpivot_id\tclose_id\tprim\tproper\tprim_amount\tproper_amount\tgain\troi\tapr\tgas_avax\ttx_hash\ttoken_balance\ttoken_committed\ttoken_available\tundead_balance\tundead_committed\tundead_available\ttotal_gain_token\ttotal_gain_undead\ttotal_gas_avax\tavg_roi\tavg_apr";
-const LOG_TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
-
-#[derive(Debug, Clone)]
-struct OpenPivot {
-    pivot_id:      u32,
-    opened_at:     u64,
-    prim:          String,
-    prim_amount:   f64,
-    proper:        String,
-    proper_amount: f64,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CumulativeStats {
-    total_opens:       u32,
-    total_closes:      u32,
-    total_gain_token:  f64,
-    total_gain_undead: f64,
-    total_gas_avax:    f64,
-    roi_sum: f64,
-    apr_sum: f64,
-}
-
-impl CumulativeStats {
-    fn avg_roi(&self) -> f64 {
-        if self.total_closes == 0 { 0.0 } else { self.roi_sum / self.total_closes as f64 }
-    }
-    fn avg_apr(&self) -> f64 {
-        if self.total_closes == 0 { 0.0 } else { self.apr_sum / self.total_closes as f64 }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PoolSnapshot {
-    token_balance:     f64,
-    token_committed:   f64,
-    token_available:   f64,
-    undead_balance:    f64,
-    undead_committed:  f64,
-    undead_available:  f64,
-}
-
-async fn pool_snapshot(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    token: &str,
-    token_committed: f64,
-    undead_committed: f64,
-) -> ErrStr<PoolSnapshot> {
-    let token_balance = wallet_balance(wallet_address, token, registry).await?;
-    let undead_balance = wallet_balance(wallet_address, UNDEAD, registry).await?;
-    Ok(PoolSnapshot {
-        token_balance,
-        token_committed,
-        token_available: token_balance - token_committed,
-        undead_balance,
-        undead_committed,
-        undead_available: undead_balance - undead_committed,
-    })
-}
-
-fn now_ts() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-fn log_ts(epoch: u64) -> String {
-    DateTime::<Utc>::from_timestamp(epoch as i64, 0)
-        .map(|dt| dt.format(LOG_TS_FORMAT).to_string())
-        .unwrap_or_else(|| format!("(bad timestamp: {epoch})"))
-}
-
-fn parse_log_ts(s: &str) -> ErrStr<u64> {
-    chrono::NaiveDateTime::parse_from_str(s, LOG_TS_FORMAT)
-        .map(|ndt| ndt.and_utc().timestamp() as u64)
-        .map_err(|e| format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}', e.g. '2026-08-05 14:32:07'): {e}"))
-}
-
-/// Appends a line to a pool's log, writing the header first if this is a
-/// brand-new file. This is the only place a pool's log file gets created.
-fn append_log(path: &str, line: &str) {
-    let needs_header = !Path::new(path).exists();
-    let result = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| -> std::io::Result<()> {
-            if needs_header {
-                writeln!(f, "{LOG_HEADER}")?;
-            }
-            writeln!(f, "{line}")?;
-            Ok(())
-        });
-    if let Err(e) = result {
-        eprintln!("Warning: could not write to trade log ({path}): {e}");
-    }
-}
-
-fn snapshot_and_cumulative_columns(snap: &PoolSnapshot, cum: &CumulativeStats) -> String {
-    let ans = format!(
-        "{:.8}\t{:.8}\t{:.8}\t{:.2}\t{:.2}\t{:.2}\t{:+.8}\t{:+.2}\t{:.8}\t{:.6}\t{:.6}",
-        snap.token_balance, snap.token_committed, snap.token_available,
-        snap.undead_balance, snap.undead_committed, snap.undead_available,
-        cum.total_gain_token, cum.total_gain_undead, cum.total_gas_avax,
-        cum.avg_roi(), cum.avg_apr(),
-    );
-    ans
-}
-
-/// Every row — OPEN or CLOSE — uses this exact column layout. Only
-/// close_id/gain/roi/apr are ever blank (OPEN doesn't have them yet).
-#[allow(clippy::too_many_arguments)]
-fn log_row(
-    path: &str,
-    kind: &str,
-    pivot_id: u32,
-    close_id: Option<u32>,
-    prim: &str,
-    proper: &str,
-    prim_amount: f64,
-    proper_amount: f64,
-    gain: Option<f64>,
-    roi: Option<f64>,
-    apr: Option<f64>,
-    gas_avax: f64,
-    tx_hash: &str,
-    snap: &PoolSnapshot,
-    cum: &CumulativeStats,
-) {
-    let close_id_s = close_id.map(|v| v.to_string()).unwrap_or_default();
-    let gain_s = gain.map(|v| format!("{v:+.8}")).unwrap_or_default();
-    let roi_s = roi.map(|v| format!("{v:.6}")).unwrap_or_default();
-    let apr_s = apr.map(|v| format!("{v:.6}")).unwrap_or_default();
-    append_log(path, &format!(
-        "{}\t{kind}\t{pivot_id}\t{close_id_s}\t{prim}\t{proper}\t{prim_amount:.8}\t{proper_amount:.8}\t{gain_s}\t{roi_s}\t{apr_s}\t{gas_avax:.8}\t{tx_hash}\t{}",
-        log_ts(now_ts()), snapshot_and_cumulative_columns(snap, cum)
-    ));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn log_open(path: &str, pivot_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &PoolSnapshot, cum: &CumulativeStats) {
-    log_row(path, "OPEN", pivot_id, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn log_close(path: &str, pivot_id: u32, close_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &PoolSnapshot, cum: &CumulativeStats) {
-    log_row(path, "CLOSE", pivot_id, Some(close_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
-}
-
-/// Reads a pool's own log fresh each run — same "no in-memory state, the
-/// log is the source of truth" design as tvá. Unlike tvá, which is wired
-/// to one pre-existing pair and hard-errors if its log is missing,
-/// arbitrage's whole point is onboarding brand-new pools — so a pool with
-/// no log file yet replays as empty, a valid starting state, not an error.
-fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)> {
-    if !Path::new(path).exists() {
-        return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
-    }
-
-    let lines = lines_from_file(path)
-        .map_err(|e| format!("Could not open trade log at '{path}': {e}"))?;
-
-    let mut open_by_id: HashMap<u32, OpenPivot> = HashMap::new();
-    let mut max_pivot_id: u32 = 0;
-    let mut max_close_id: u32 = 0;
-    let mut stats = CumulativeStats::default();
-
-    for (line_no, line) in lines.iter().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with("timestamp\t") {
-            continue; // blank, comment, or the header row itself
-        }
-        let fields: Vec<&str> = line.split('\t').collect();
-        let kind = *fields.get(1).unwrap_or(&"");
-
-        if fields.len() < 13 {
-            return Err(format!("malformed line at {path}:{}: too few columns: '{line}'", line_no + 1));
-        }
-        let ts: u64 = parse_log_ts(fields[0])
-            .map_err(|e| format!("{e} at {path}:{}: '{line}'", line_no + 1))?;
-        let pivot_id: u32 = fields[2].parse()
-            .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
-        let prim = fields[4];
-        let proper = fields[5];
-        let prim_amount: f64 = fields[6].parse()
-            .map_err(|_| format!("bad prim_amount at {path}:{}: '{line}'", line_no + 1))?;
-        let proper_amount: f64 = fields[7].parse()
-            .map_err(|_| format!("bad proper_amount at {path}:{}: '{line}'", line_no + 1))?;
-        let gas_avax: f64 = fields[11].parse()
-            .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
-
-        match kind {
-            "OPEN" => {
-                max_pivot_id = max_pivot_id.max(pivot_id);
-                stats.total_opens += 1;
-                stats.total_gas_avax += gas_avax;
-                open_by_id.insert(pivot_id, OpenPivot {
-                    pivot_id, opened_at: ts,
-                    prim: prim.to_string(), prim_amount,
-                    proper: proper.to_string(), proper_amount,
-                });
-            }
-            "CLOSE" => {
-                let close_id: u32 = fields[3].parse()
-                    .map_err(|_| format!("bad close_id at {path}:{}: '{line}'", line_no + 1))?;
-                let gain: f64 = fields[8].parse()
-                    .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;
-                let roi: f64 = fields[9].parse()
-                    .map_err(|_| format!("bad roi at {path}:{}: '{line}'", line_no + 1))?;
-                let apr: f64 = fields[10].parse()
-                    .map_err(|_| format!("bad apr at {path}:{}: '{line}'", line_no + 1))?;
-
-                let closed_pivot = open_by_id.remove(&pivot_id)
-                    .ok_or_else(|| format!(
-                        "CLOSE at {path}:{} references pivot #{pivot_id}, which has no matching OPEN before it",
-                        line_no + 1
-                    ))?;
-
-                max_close_id = max_close_id.max(close_id);
-                stats.total_closes += 1;
-                stats.total_gas_avax += gas_avax;
-                stats.roi_sum += roi;
-                stats.apr_sum += apr;
-                if closed_pivot.prim == UNDEAD {
-                    stats.total_gain_undead += gain;
-                } else {
-                    stats.total_gain_token += gain;
-                }
-            }
-            other => return Err(format!("unrecognized log line type '{other}' at {path}:{}: '{line}'", line_no + 1)),
-        }
-    }
-
-    let still_open: Vec<OpenPivot> = open_by_id.into_values().collect();
-    Ok((still_open, max_pivot_id + 1, max_close_id + 1, stats))
-}
-
-fn biggest_first(mut pivots: Vec<OpenPivot>) -> Vec<OpenPivot> {
-    pivots.sort_by(|a, b| {
-        b.proper_amount.partial_cmp(&a.proper_amount).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    pivots
-}
+const LOG_HEADER: &str = "timestamp\tkind\tpivot_id\tclose_id\tprim\tproper\tprim_amount\tproper_amount\tgain\troi\tapr\tgas_avax\ttx_hash\tasset_balance\tasset_committed\tasset_available\tundead_balance\tundead_committed\tundead_available\ttotal_gain_asset\ttotal_gain_undead\ttotal_gas_avax\tavg_roi\tavg_apr";
 
 /// Finds every pool that has ever been opened by scanning this binary's
 /// data/ directory for per-pool log files — "go through any existing
@@ -326,44 +83,6 @@ fn discover_pools() -> ErrStr<Vec<String>> {
     }
     pools.sort();
     Ok(pools)
-}
-
-//============================================================================
-//----- Shared trade-attempt helper --------------------------------------------
-//============================================================================
-enum AttemptOutcome {
-    NotCleared,
-    DryRunWouldClear { quoted_amount_out: f64 },
-    Executed { tx_hash: String, actual_received: f64, gas_avax: f64 },
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn attempt_trade_with_actual_amount(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    from_symbol: &str,
-    to_symbol: &str,
-    amount: f64,
-    min_floor: f64,
-    slippage_bps: u16,
-    dry_run: bool,
-    debug: bool,
-) -> ErrStr<AttemptOutcome> {
-    let quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
-    if quote.amount_out <= min_floor {
-        return Ok(AttemptOutcome::NotCleared);
-    }
-
-    if dry_run {
-        return Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: quote.amount_out });
-    }
-
-    let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
-    let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, "KEYSTORE_PATH", debug).await?;
-    let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
-    let actual_received = balance_after - balance_before;
-
-    Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
 }
 
 //============================================================================
@@ -407,7 +126,7 @@ async fn run_pool_cycle(
     for pivot in open_pivots {
         match attempt_trade_with_actual_amount(
             wallet_address, registry, &pivot.proper, &pivot.prim,
-            pivot.proper_amount, pivot.prim_amount, DEFAULT_SLIPPAGE_BPS, dry_run, debug,
+            pivot.proper_amount, pivot.prim_amount, DEFAULT_SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
         ).await {
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
                 let gain = actual_received - pivot.prim_amount;
@@ -432,11 +151,11 @@ async fn run_pool_cycle(
                 if pivot.prim == UNDEAD {
                     running_stats.total_gain_undead += gain;
                 } else {
-                    running_stats.total_gain_token += gain;
+                    running_stats.total_gain_asset += gain;
                 }
 
-                let snap = pool_snapshot(wallet_address, registry, token, committed_token, committed_undead).await?;
-                log_close(&path, pivot.pivot_id, next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
+                let snap = balance_snapshot(wallet_address, registry, token, committed_token, committed_undead).await?;
+                log_close(&path, Some(LOG_HEADER), pivot.pivot_id, next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
                 next_close_id += 1;
                 closed_something = true;
             }
@@ -463,18 +182,18 @@ async fn run_pool_cycle(
         println!("  (no configured open amount for {token} yet — opens skipped, closes only)");
     }
 
-    if running_stats.total_gain_token < 0.0 || running_stats.total_gain_undead < 0.0 {
+    if running_stats.total_gain_asset < 0.0 || running_stats.total_gain_undead < 0.0 {
         println!(
             "  \u{26A0} WARNING: realized cumulative gain is negative for {token} — this is NOT a \
              timing artifact, closes are actually losing money. {token} {:+.6}   UNDEAD {:+.2}",
-            running_stats.total_gain_token, running_stats.total_gain_undead
+            running_stats.total_gain_asset, running_stats.total_gain_undead
         );
     }
 
     println!(
         "  Totals = {} closes, {} opens   gain {token} {:+.6}   gain UNDEAD {:+.2}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
         running_stats.total_closes, running_stats.total_opens,
-        running_stats.total_gain_token, running_stats.total_gain_undead, running_stats.total_gas_avax,
+        running_stats.total_gain_asset, running_stats.total_gain_undead, running_stats.total_gas_avax,
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
     );
 
@@ -561,14 +280,14 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 1: TOKEN -> UNDEAD
     let undead_received = match attempt_trade_with_actual_amount(
-        &wallet_address, &registry, &token, UNDEAD, amount, NO_REAL_FLOOR, slippage_bps, dry_run, debug,
+        &wallet_address, &registry, &token, UNDEAD, amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {amount:.8} {token} -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
             running_stats.total_opens += 1;
             running_stats.total_gas_avax += gas_avax;
-            let snap = pool_snapshot(&wallet_address, &registry, &token, 0.0, actual_received).await?;
-            log_open(&path, next_pivot_id, &token, amount, UNDEAD, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
+            let snap = balance_snapshot(&wallet_address, &registry, &token, 0.0, actual_received).await?;
+            log_open(&path, Some(LOG_HEADER), next_pivot_id, &token, amount, UNDEAD, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
             next_pivot_id += 1;
             actual_received
         }
@@ -584,14 +303,14 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 2: UNDEAD -> TOKEN, using exactly what pivot 1 returned — not a fresh quote.
     match attempt_trade_with_actual_amount(
-        &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, dry_run, debug,
+        &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {undead_received:.2} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX");
             running_stats.total_opens += 1;
             running_stats.total_gas_avax += gas_avax;
-            let snap = pool_snapshot(&wallet_address, &registry, &token, actual_received, undead_received).await?;
-            log_open(&path, next_pivot_id, UNDEAD, undead_received, &token, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
+            let snap = balance_snapshot(&wallet_address, &registry, &token, actual_received, undead_received).await?;
+            log_open(&path, Some(LOG_HEADER), next_pivot_id, UNDEAD, undead_received, &token, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
         }
         AttemptOutcome::DryRunWouldClear { quoted_amount_out } => {
             println!("  WOULD OPEN  #{next_pivot_id:<4} {undead_received:.2} UNDEAD -> ~{quoted_amount_out:.8} {token}   (dry run, no funds moved)");
@@ -687,7 +406,7 @@ async fn run_trade_for_symbols(
         println!(">>> Quote clears your floor. Proceeding to execute.");
     }
 
-    match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, "KEYSTORE_PATH", debug).await {
+    match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, KEYSTORE_PATH_VAR, debug).await {
         Ok((tx_hash, _gas_avax)) => {
             println!(">>> Trade complete. Tx hash: {tx_hash}");
             log_trade_outcome(from_symbol, to_symbol, amount, quote.amount_out, &tx_hash);
@@ -827,7 +546,7 @@ enum Command {
 
 #[derive(Debug, Parser)]
 #[command(name = "arbitrage")]
-#[command(version = "0.12.0")]
+#[command(version = "0.13.0")]
 struct Args {
     /// No subcommand = full survey: walk every existing pool's log and
     /// close what's ready to close.
@@ -835,16 +554,17 @@ struct Args {
     command: Option<Command>,
 
     /// Applies across every subcommand and the default survey — checks
-    /// only, never touches the keystore or sends a tx. Put it *before*
-    /// the subcommand name, e.g. `arbitrage --dry-run new PAXG 2.0`.
-    #[arg(long, default_value_t = false)]
+    /// only, never touches the keystore or sends a tx. `global = true`
+    /// means it can go either before or after the subcommand, e.g. both
+    /// `arbitrage --dry-run new PAXG 2.0` and `arbitrage new PAXG 2.0 --dry-run` work.
+    #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
 
     /// Applies across every subcommand and the default survey. Without
     /// it, a trade collapses to one concise line instead of the full
-    /// approve/quote/swap play-by-play — put it *before* the subcommand
-    /// name, e.g. `arbitrage --debug new PAXG 2.0`.
-    #[arg(long, default_value_t = false)]
+    /// approve/quote/swap play-by-play. Also `global = true` — can go
+    /// before or after the subcommand.
+    #[arg(long, global = true, default_value_t = false)]
     debug: bool,
 }
 
@@ -898,16 +618,9 @@ mod unit_tests {
         assert!(run_new("BTC", 0.0, 50, true, false).await.is_err());
     }
 
-    #[test]
-    fn test_biggest_first_orders_by_proper_amount_descending() {
-        let pivots = vec![
-            OpenPivot { pivot_id: 1, opened_at: 0, prim: "BTC".into(), prim_amount: 1.0, proper: "UNDEAD".into(), proper_amount: 100.0 },
-            OpenPivot { pivot_id: 2, opened_at: 0, prim: "BTC".into(), prim_amount: 1.0, proper: "UNDEAD".into(), proper_amount: 300.0 },
-            OpenPivot { pivot_id: 3, opened_at: 0, prim: "BTC".into(), prim_amount: 1.0, proper: "UNDEAD".into(), proper_amount: 200.0 },
-        ];
-        let sorted = biggest_first(pivots);
-        assert_eq!(sorted.iter().map(|p| p.pivot_id).collect::<Vec<_>>(), vec![2, 3, 1]);
-    }
+    // biggest_first itself is shared with tvá and tested once in
+    // trading::auto_trading's own unit tests — nothing arbitrage-specific
+    // left to cover here.
 }
 //============================================================================
 //----- FUNCTIONAL TESTS -------------------------------------------------------

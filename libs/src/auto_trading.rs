@@ -1,7 +1,14 @@
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
 use std::str::FromStr;
-use std::time::Duration;
-use book::err_utils::ErrStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use chrono::{DateTime, Utc};
+use book::{
+        err_utils::ErrStr,
+        file_utils::lines_from_file,
+};
 use ethers::{
         middleware::SignerMiddleware,
         providers::{Http, Middleware, Provider},
@@ -40,6 +47,20 @@ pub fn token_entry<'a>(registry: &'a TokenRegistry, symbol: &str) -> ErrStr<&'a 
         )),
     }
 }
+
+//============================================================================
+//----- Shared Trading Constants -----------------------------------------------
+//============================================================================
+/// Every asset<->UNDEAD pool binary in this codebase (tvá, arbitrage)
+/// trades against UNDEAD as the fixed other leg.
+pub const UNDEAD: &str = "UNDEAD";
+
+/// Used for opening pivots, where there's no real floor to enforce yet —
+/// a near-zero floor means "accept whatever the live quote is," while
+/// still routing through the same clear-a-floor codepath as every other
+/// trade, rather than a separate unchecked path. Shared by every binary
+/// that opens fresh pivots (tvá, arbitrage).
+pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
 
 //============================================================================
 //----- Shared HTTP Client ----------------------------------------------------
@@ -204,6 +225,335 @@ pub async fn live_quote(
     let amount_out = raw as f64 / 10f64.powi(to_entry.decimals as i32);
 
     Ok(KyberQuote { amount_out, route_summary_raw, router_address })
+}
+
+//============================================================================
+//----- Shared Pivot & Trade-Cycle Types ---------------------------------------
+//============================================================================
+// Everything in this section used to be duplicated, near byte-for-byte,
+// between tvá's and arbitrage's mod.rs — the only differences were the
+// name of the non-UNDEAD leg ("BTC" for tvá's one fixed pair, "TOKEN" for
+// whichever pool arbitrage is working) and, for arbitrage, a `path` per
+// pool instead of one fixed log file. Both are now plain parameters.
+
+/// One open position: `proper` is what was spent to open it, `prim` is
+/// what closing it will swap back to.
+#[derive(Debug, Clone)]
+pub struct OpenPivot {
+    pub pivot_id:      u32,
+    pub opened_at:     u64,
+    pub prim:          String,
+    pub prim_amount:   f64,
+    pub proper:        String,
+    pub proper_amount: f64,
+}
+
+/// Running totals across a pivot log's whole history. `total_gain_asset`
+/// is the cumulative realized gain in whichever token isn't UNDEAD (BTC
+/// for tvá, the pool's token for arbitrage); `total_gain_undead` is the
+/// same for UNDEAD.
+#[derive(Debug, Clone, Default)]
+pub struct CumulativeStats {
+    pub total_opens:       u32,
+    pub total_closes:      u32,
+    pub total_gain_asset:  f64,
+    pub total_gain_undead: f64,
+    pub total_gas_avax:    f64,
+    pub roi_sum: f64,
+    pub apr_sum: f64,
+}
+
+impl CumulativeStats {
+    pub fn avg_roi(&self) -> f64 {
+        if self.total_closes == 0 { 0.0 } else { self.roi_sum / self.total_closes as f64 }
+    }
+    pub fn avg_apr(&self) -> f64 {
+        if self.total_closes == 0 { 0.0 } else { self.apr_sum / self.total_closes as f64 }
+    }
+}
+
+/// Wallet balances for one asset<->UNDEAD pair — `asset` is BTC for tvá
+/// (its one fixed pair) and whichever token a pool is keyed on for
+/// arbitrage (one pair per pool).
+#[derive(Debug, Clone, Copy)]
+pub struct BalanceSnapshot {
+    pub asset_balance:    f64,
+    pub asset_committed:  f64,
+    pub asset_available:  f64,
+    pub undead_balance:   f64,
+    pub undead_committed: f64,
+    pub undead_available: f64,
+}
+
+pub async fn balance_snapshot(
+    wallet_address: &str,
+    registry: &TokenRegistry,
+    asset_symbol: &str,
+    asset_committed: f64,
+    undead_committed: f64,
+) -> ErrStr<BalanceSnapshot> {
+    // Two independent reads — nothing here depends on the other's result —
+    // so they run concurrently instead of one after another. This is only
+    // safe because both sides are reads; the trade-execution path stays
+    // sequential per wallet since signing needs nonces to land in order.
+    let (asset_balance, undead_balance) = tokio::try_join!(
+        wallet_balance(wallet_address, asset_symbol, registry),
+        wallet_balance(wallet_address, UNDEAD, registry),
+    )?;
+    Ok(BalanceSnapshot {
+        asset_balance,
+        asset_committed,
+        asset_available: asset_balance - asset_committed,
+        undead_balance,
+        undead_committed,
+        undead_available: undead_balance - undead_committed,
+    })
+}
+
+pub fn snapshot_and_cumulative_columns(snap: &BalanceSnapshot, cum: &CumulativeStats) -> String {
+    let ans = format!(
+        "{:.8}\t{:.8}\t{:.8}\t{:.2}\t{:.2}\t{:.2}\t{:+.8}\t{:+.2}\t{:.8}\t{:.6}\t{:.6}",
+        snap.asset_balance, snap.asset_committed, snap.asset_available,
+        snap.undead_balance, snap.undead_committed, snap.undead_available,
+        cum.total_gain_asset, cum.total_gain_undead, cum.total_gas_avax,
+        cum.avg_roi(), cum.avg_apr(),
+    );
+    ans
+}
+
+/// "Biggest position first" — every survey/cycle closes its largest
+/// commitments before its smallest.
+pub fn biggest_first(mut pivots: Vec<OpenPivot>) -> Vec<OpenPivot> {
+    pivots.sort_by(|a, b| {
+        b.proper_amount.partial_cmp(&a.proper_amount).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    pivots
+}
+
+pub fn now_ts() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+pub const LOG_TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+pub fn log_ts(epoch: u64) -> String {
+    DateTime::<Utc>::from_timestamp(epoch as i64, 0)
+        .map(|dt| dt.format(LOG_TS_FORMAT).to_string())
+        .unwrap_or_else(|| format!("(bad timestamp: {epoch})"))
+}
+
+pub fn parse_log_ts(s: &str) -> ErrStr<u64> {
+    chrono::NaiveDateTime::parse_from_str(s, LOG_TS_FORMAT)
+        .map(|ndt| ndt.and_utc().timestamp() as u64)
+        .map_err(|e| format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}', e.g. '2026-08-05 14:32:07'): {e}"))
+}
+
+/// Appends one line to a trade log, creating the file on first write.
+/// `header` is `None` for logs that never had one (tvá's single fixed
+/// log) and `Some(..)` for logs that write a header the first time they're
+/// created (arbitrage's per-pool logs) — which one to pass is a caller
+/// choice, not a guess, since guessing wrong would silently corrupt an
+/// existing binary's log format.
+pub fn append_trade_log_line(path: &str, line: &str, header: Option<&str>) {
+    let needs_header = header.is_some() && !Path::new(path).exists();
+    let result = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| -> std::io::Result<()> {
+            if needs_header {
+                writeln!(f, "{}", header.unwrap())?;
+            }
+            writeln!(f, "{line}")?;
+            Ok(())
+        });
+    if let Err(e) = result {
+        eprintln!("Warning: could not write to trade log ({path}): {e}");
+    }
+}
+
+/// Every row — OPEN or CLOSE — uses this exact column layout. Only
+/// close_id/gain/roi/apr are ever blank (OPEN doesn't have them yet);
+/// everything else, including prim_amount, is filled on both row types.
+#[allow(clippy::too_many_arguments)]
+pub fn log_row(
+    path: &str,
+    header: Option<&str>,
+    kind: &str,
+    pivot_id: u32,
+    close_id: Option<u32>,
+    prim: &str,
+    proper: &str,
+    prim_amount: f64,
+    proper_amount: f64,
+    gain: Option<f64>,
+    roi: Option<f64>,
+    apr: Option<f64>,
+    gas_avax: f64,
+    tx_hash: &str,
+    snap: &BalanceSnapshot,
+    cum: &CumulativeStats,
+) {
+    let close_id_s = close_id.map(|v| v.to_string()).unwrap_or_default();
+    let gain_s = gain.map(|v| format!("{v:+.8}")).unwrap_or_default();
+    let roi_s = roi.map(|v| format!("{v:.6}")).unwrap_or_default();
+    let apr_s = apr.map(|v| format!("{v:.6}")).unwrap_or_default();
+    append_trade_log_line(path, &format!(
+        "{}\t{kind}\t{pivot_id}\t{close_id_s}\t{prim}\t{proper}\t{prim_amount:.8}\t{proper_amount:.8}\t{gain_s}\t{roi_s}\t{apr_s}\t{gas_avax:.8}\t{tx_hash}\t{}",
+        log_ts(now_ts()), snapshot_and_cumulative_columns(snap, cum)
+    ), header);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_open(path: &str, header: Option<&str>, pivot_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
+    log_row(path, header, "OPEN", pivot_id, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_close(path: &str, header: Option<&str>, pivot_id: u32, close_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
+    log_row(path, header, "CLOSE", pivot_id, Some(close_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
+}
+
+/// Replays a pivot log from scratch — no in-memory state carried between
+/// runs, the log file itself is the source of truth. A missing file
+/// replays as empty (id counters starting at 1, zeroed stats): a fresh
+/// pool with no history yet is a valid starting state as far as this
+/// function is concerned. A binary that instead expects pre-existing
+/// history (tvá, wired to one real pair) checks for the file itself
+/// before calling this and hard-errors on its own terms if it's missing —
+/// see e.g. tvá's `replay_log_with_history_required`.
+///
+/// Tolerates two backward-compat line shapes so both binaries' existing
+/// logs replay unchanged: a leading header row (`timestamp\t...`, used by
+/// logs that write one) and old-format `CHECK` rows (used by tvá's
+/// earlier log format) are both skipped rather than rejected.
+pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)> {
+    if !Path::new(path).exists() {
+        return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
+    }
+
+    let lines = lines_from_file(path)
+        .map_err(|e| format!("Could not open trade log at '{path}': {e}"))?;
+
+    let mut open_by_id: HashMap<u32, OpenPivot> = HashMap::new();
+    let mut max_pivot_id: u32 = 0;
+    let mut max_close_id: u32 = 0;
+    let mut stats = CumulativeStats::default();
+
+    for (line_no, line) in lines.iter().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with("timestamp\t") {
+            continue; // blank, comment, or a header row
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let kind = *fields.get(1).unwrap_or(&"");
+
+        if kind == "CHECK" {
+            continue; // old-format tvá rows, tolerated but not counted
+        }
+
+        if fields.len() < 13 {
+            return Err(format!("malformed line at {path}:{}: too few columns: '{line}'", line_no + 1));
+        }
+        let ts: u64 = parse_log_ts(fields[0])
+            .map_err(|e| format!("{e} at {path}:{}: '{line}'", line_no + 1))?;
+        let pivot_id: u32 = fields[2].parse()
+            .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
+        let prim = fields[4];
+        let proper = fields[5];
+        let prim_amount: f64 = fields[6].parse()
+            .map_err(|_| format!("bad prim_amount at {path}:{}: '{line}'", line_no + 1))?;
+        let proper_amount: f64 = fields[7].parse()
+            .map_err(|_| format!("bad proper_amount at {path}:{}: '{line}'", line_no + 1))?;
+        let gas_avax: f64 = fields[11].parse()
+            .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
+
+        match kind {
+            "OPEN" => {
+                max_pivot_id = max_pivot_id.max(pivot_id);
+                stats.total_opens += 1;
+                stats.total_gas_avax += gas_avax;
+                open_by_id.insert(pivot_id, OpenPivot {
+                    pivot_id, opened_at: ts,
+                    prim: prim.to_string(), prim_amount,
+                    proper: proper.to_string(), proper_amount,
+                });
+            }
+            "CLOSE" => {
+                let close_id: u32 = fields[3].parse()
+                    .map_err(|_| format!("bad close_id at {path}:{}: '{line}'", line_no + 1))?;
+                let gain: f64 = fields[8].parse()
+                    .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;
+                let roi: f64 = fields[9].parse()
+                    .map_err(|_| format!("bad roi at {path}:{}: '{line}'", line_no + 1))?;
+                let apr: f64 = fields[10].parse()
+                    .map_err(|_| format!("bad apr at {path}:{}: '{line}'", line_no + 1))?;
+
+                let closed_pivot = open_by_id.remove(&pivot_id)
+                    .ok_or_else(|| format!(
+                        "CLOSE at {path}:{} references pivot #{pivot_id}, which has no matching OPEN before it",
+                        line_no + 1
+                    ))?;
+
+                max_close_id = max_close_id.max(close_id);
+                stats.total_closes += 1;
+                stats.total_gas_avax += gas_avax;
+                stats.roi_sum += roi;
+                stats.apr_sum += apr;
+                if closed_pivot.prim == UNDEAD {
+                    stats.total_gain_undead += gain;
+                } else {
+                    stats.total_gain_asset += gain;
+                }
+            }
+            other => return Err(format!("unrecognized log line type '{other}' at {path}:{}: '{line}'", line_no + 1)),
+        }
+    }
+
+    let still_open: Vec<OpenPivot> = open_by_id.into_values().collect();
+    Ok((still_open, max_pivot_id + 1, max_close_id + 1, stats))
+}
+
+//============================================================================
+//----- Shared Trade-Attempt Helper --------------------------------------------
+//============================================================================
+pub enum AttemptOutcome {
+    NotCleared,
+    DryRunWouldClear { quoted_amount_out: f64 },
+    Executed { tx_hash: String, actual_received: f64, gas_avax: f64 },
+}
+
+/// Quotes, checks the floor, and (unless dry-running) executes — the one
+/// trade-attempt pipeline every pivot open/close in this system goes
+/// through, regardless of which binary is calling it.
+#[allow(clippy::too_many_arguments)]
+pub async fn attempt_trade_with_actual_amount(
+    wallet_address: &str,
+    registry: &TokenRegistry,
+    from_symbol: &str,
+    to_symbol: &str,
+    amount: f64,
+    min_floor: f64,
+    slippage_bps: u16,
+    keystore_path_var: &str,
+    dry_run: bool,
+    debug: bool,
+) -> ErrStr<AttemptOutcome> {
+    let quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
+    if quote.amount_out <= min_floor {
+        return Ok(AttemptOutcome::NotCleared);
+    }
+
+    if dry_run {
+        return Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: quote.amount_out });
+    }
+
+    let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
+    let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
+    let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
+    let actual_received = balance_after - balance_before;
+
+    Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
 }
 
 //============================================================================
@@ -516,6 +866,120 @@ mod unit_tests {
         assert_eq!(padded.len(), 64);
         assert!(padded.ends_with("69b21dc480ca62e478d997d7313061f765a5b122"));
         assert!(padded.starts_with("00000000000000000000"));
+    }
+
+    #[test]
+    fn test_log_ts_round_trips_through_utc_without_drift() {
+        for epoch in [0u64, 1_000, 1_785_896_548, 1_785_933_872] {
+            let formatted = log_ts(epoch);
+            let parsed = parse_log_ts(&formatted).expect("a freshly-formatted timestamp must parse back cleanly");
+            assert_eq!(parsed, epoch, "round-tripping epoch {epoch} through '{formatted}' should recover the exact same second, not just the same day");
+        }
+    }
+
+    #[test]
+    fn test_biggest_first_sorts_by_raw_proper_amount_descending() {
+        let make = |id: u32, proper_amount: f64| OpenPivot {
+            pivot_id: id, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
+            proper: "Y".into(), proper_amount,
+        };
+        let pivots = vec![make(1, 500_000.0), make(2, 0.005), make(3, 520_000.0)];
+        let sorted = biggest_first(pivots);
+        let ids: Vec<u32> = sorted.iter().map(|p| p.pivot_id).collect();
+        assert_eq!(ids, vec![3, 1, 2], "should be ordered biggest proper_amount to smallest, raw number, no currency conversion");
+    }
+
+    #[test]
+    fn test_replay_log_missing_file_replays_as_a_fresh_empty_pool() -> ErrStr<()> {
+        let (opens, next_pivot, next_close, stats) = replay_log("/tmp/definitely_does_not_exist.log")?;
+        assert!(opens.is_empty());
+        assert_eq!(next_pivot, 1);
+        assert_eq!(next_close, 1);
+        assert_eq!(stats.total_opens, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_replay_log_open_then_close_leaves_nothing_open_and_totals_gain() -> ErrStr<()> {
+        let path = std::env::temp_dir().join("auto_trading_test_open_close.log");
+        let path_str = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
+             1970-01-01 00:33:20\tCLOSE\t1\t1\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
+        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+
+        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
+        assert!(opens.is_empty(), "pivot 1 was closed, should not appear as open");
+        assert_eq!(next_pivot, 2);
+        assert_eq!(next_close, 2);
+        assert_eq!(stats.total_opens, 1);
+        assert_eq!(stats.total_closes, 1);
+        assert!((stats.total_gain_undead - 11112.13).abs() < 0.001, "gain should land in the UNDEAD bucket (prim was UNDEAD)");
+        assert_eq!(stats.total_gain_asset, 0.0);
+        assert!((stats.total_gas_avax - 0.008).abs() < 0.00001, "gas should sum across the OPEN and CLOSE");
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_replay_log_open_without_close_stays_open() -> ErrStr<()> {
+        let path = std::env::temp_dir().join("auto_trading_test_open_only.log");
+        let path_str = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
+             1970-01-01 00:16:40\tOPEN\t2\t\tBTC\tUNDEAD\t0.00500000\t487122.54000000\t\t\t\t0.00300000\t0xdef\n\
+             1970-01-01 00:33:20\tCHECK\t1\tnot_closed\n",
+        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+
+        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
+        assert_eq!(opens.len(), 2, "neither pivot was closed, both should still be open");
+        assert_eq!(next_pivot, 3);
+        assert_eq!(next_close, 1, "no CLOSE lines yet, so next_close_id stays at 1");
+        assert_eq!(stats.total_closes, 0, "old-format CHECK lines are tolerated but don't count as closes");
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_replay_log_skips_a_leading_header_row() -> ErrStr<()> {
+        let path = std::env::temp_dir().join("auto_trading_test_header.log");
+        let path_str = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "timestamp\tkind\tpivot_id\tclose_id\tprim\tproper\tprim_amount\tproper_amount\tgain\troi\tapr\tgas_avax\ttx_hash\n\
+             1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
+        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+
+        let (opens, _, _, _) = replay_log(path_str)?;
+        assert_eq!(opens.len(), 1, "the header row should be skipped, not treated as a malformed data row");
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_replay_log_rejects_malformed_line() {
+        let path = std::env::temp_dir().join("auto_trading_test_malformed.log");
+        std::fs::write(&path, "not\teven\tclose\tto\tvalid\n").unwrap();
+        let result = replay_log(path.to_str().unwrap());
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_replay_log_rejects_close_with_no_matching_open() {
+        let path = std::env::temp_dir().join("auto_trading_test_orphan_close.log");
+        std::fs::write(
+            &path,
+            "2026-01-01 00:00:00\tCLOSE\t99\t1\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
+        ).unwrap();
+        let result = replay_log(path.to_str().unwrap());
+        assert!(result.is_err(), "a CLOSE referencing a pivot_id with no prior OPEN should be a hard error, not silently ignored");
+        let _ = std::fs::remove_file(&path);
     }
 }
 
