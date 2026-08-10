@@ -51,7 +51,7 @@ const BTC_TRADE_AMOUNT: f64 = 0.005;
 const SLIPPAGE_BPS: u16 = 200;
 const STARTING_UNDEAD: f64 = 5_000_000.0;
 const STARTING_BTC: f64 = 0.05;
-const ILLUSTRATIVE_SKIM_PCT: f64 = 0.50;
+const ILLUSTRATIVE_SKIM_PCT: f64 = 0.25;
 const VAULT_ADDRESS: &str = "0xe25835EF625ecE064d899844e17Ea59742369A92";
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //============================================================================
