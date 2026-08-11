@@ -24,7 +24,9 @@ jobs:
     steps:
       - name: Checkout trading
         uses: actions/checkout@v4
-
+        with: 
+          path: trading
+          
       - name: Checkout protocol
         uses: actions/checkout@v4
         with:
