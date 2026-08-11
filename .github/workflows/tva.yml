@@ -36,6 +36,7 @@ jobs:
         with:
           repository: pivoteur/protocol
           path: protocol
+          ref: main
 
       - name: Load Shared Environment Variables
         uses: doughepi/yaml-env-action@v1.0.0
