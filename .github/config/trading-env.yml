@@ -1,0 +1,11 @@
+PROTOCOL_ALIAS: trading
+RAW_URL: https://raw.githubusercontent.com
+DAPPS_DIR: trading/dapps
+EXE_SUBDIR: target/release
+QUIZZES_SRC: trading/quizzes/src
+
+
+# env you need to run the dapps from pivoteur/protocol:
+
+# ${{ var.USER0_NAME }}
+# ${{ sec.USER0_EMAIL }}
