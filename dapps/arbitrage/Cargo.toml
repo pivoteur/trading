@@ -5,10 +5,10 @@ edition = "2024"
 
 [[bin]]
 name = "arbitrage"
-path = "../../quizzes/src/quiz01/arbitrage/src/main.rs"
+path = "../../quizzes/src/quiz01/b_arbitrage/src/main.rs"
 
 [dependencies]
-quizzes = { path = "../../../protocol/quizzes" }
+quizzes = { path = "../../quizzes" }
 book = { path = "../../../crypto-n-rust/src/libs/book" }
 libs = { path = "../../../protocol/libs" }
 
