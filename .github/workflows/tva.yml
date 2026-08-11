@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout pivoteur.github.io
+      - name: Checkout trading
         uses: actions/checkout@v4
 
       - name: Checkout protocol
