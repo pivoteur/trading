@@ -36,6 +36,19 @@ where:
 
 * [source](../../quizzes/src/quiz01/arbitrage/mod.rs)
 
+## notes
+
+* `KEYSTORE_PATH` is established with the command:
+
+> cast wallet import arbitrage-wallet --interactive
+
+Which saves the keystore information to ~/.foundry/keystores. This path (to the
+specific wallet) is what you save as `KEYSTORE_PATH`.
+
+* `cast` is from Forge foundry which is installed with
+
+> curl -L https://foundry.paradigm.xyz | bash
+
 ## Revisions
 
 * 0.10.1, 2026-08-04: `wallet_address_from_env`/`load_signer` now take the
