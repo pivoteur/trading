@@ -11,8 +11,8 @@ on:
         description: 'Debug mode (verbose logging)?'
         type: boolean
         default: false
-  schedule:
-    - cron: "0 * * * *"
+  # schedule:
+    # - cron: "0 * * * *"
 
 env:
   DAPP: tva
@@ -116,8 +116,8 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/tva-keystore.json"
 
-      - name: Commit trade log to protocol
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+      - name: Commit trade log to trading
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           USER0_NAME:     ${{ vars.USER0_NAME }}
           USER0_EMAIL:    ${{ secrets.USER0_EMAIL }}
