@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use book::{
         err_utils::ErrStr,
         file_utils::lines_from_file,
+        utils::get_env
 };
 use ethers::{
         middleware::SignerMiddleware,
@@ -797,7 +798,7 @@ pub async fn send_tokens(
     wallet_address: &str,
     registry: &TokenRegistry,
     symbol: &str,
-    to_address: &str,
+    to_address_var: &str,
     amount: f64,
     keystore_path_var: &str,
     verbose: bool,
@@ -817,10 +818,11 @@ pub async fn send_tokens(
     })?;
     let amount_base = (amount * 10f64.powi(entry.decimals as i32)).round() as u128;
 
+    let to_address = get_env(to_address_var)?;
     // transfer(address,uint256) selector = 0xa9059cbb
     let data_hex = format!(
         "0xa9059cbb{}{}",
-        pad_address_for_call(to_address),
+        pad_address_for_call(&to_address),
         pad_u256_for_call(amount_base)
     );
     let to = Address::from_str(token_addr).map_err(|e| format!("Bad token address: {e}"))?;
