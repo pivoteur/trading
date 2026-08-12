@@ -103,12 +103,13 @@ jobs:
           # unless dry_run is explicitly the string "false" means an
           # unfamiliar/scheduled trigger path fails safe, not live.
           ARGS=""
-          if [ "${{ github.event.inputs.dry_run }}" != "false" ]; then
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
           if [ "${{ github.event.inputs.debug }}" = "true" ]; then
             ARGS="$ARGS --debug"
           fi
+          echo "=== Running tva with args: $ARGS ==="
           $DAPP $ARGS
 
       - name: Delete keystore file
