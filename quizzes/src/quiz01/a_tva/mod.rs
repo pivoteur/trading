@@ -312,12 +312,8 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
         }
         return Ok(());
     }
-
-    async fn token_to_send(wallet_address: &str, registry: &TokenRegistry, token: &str, vault_address: &str, amount: f64, keystore_var: &str, debug: bool) -> ErrStr<(String, f64)> {
-        send_tokens(wallet_address, registry, token, vault_address, amount, keystore_var, debug).await
-    }
     
-    let (tx_hash, gas_avax) = token_to_send(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
+    let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
     println!("  Sent {amount:.4} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
     Ok(())
 }
