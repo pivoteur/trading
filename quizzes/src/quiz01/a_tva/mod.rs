@@ -1,3 +1,5 @@
+use std::{eprint, eprintln};
+
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
@@ -99,6 +101,9 @@ pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
 
     let mut closed_something = false;
 
+    if debug {
+        eprintln!("runninf cycles {}", open_pivots.len());
+    }
     for pivot in open_pivots {
         pivot_survey(dry_run, debug, &wallet_address, &registry, &mut next_close_id, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut closed_something, pivot, pct).await?;
     }
@@ -322,8 +327,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
         }
         Some(Command::Div { pct }) => { pct }
     };
-    run_cycle(pct, args.dry_run, args.debug).await
-
+        run_cycle(pct, args.dry_run, args.debug).await
 }
 
 //============================================================================
