@@ -603,7 +603,6 @@ fn debug_trade_result(tx: Option<&str>, kind: &str, from_symbol: &str, to_symbol
         eprintln!(
             "[{kind}] Trade {from_symbol} -> {to_symbol} {} swap {amount:.4} -> {amount_out:.4} (floor {floor:.4})",
             if tx.is_some() { format!("tx {}", tx.unwrap()) } else { s("") },
-            amount = swap.amount_out,
             amount_out = swap.amount_out,
             floor = min_floor
         );
