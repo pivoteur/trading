@@ -260,7 +260,7 @@ pub async fn kyber_swap(
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
     pub pivot_id:      Id,
-    pub opened_at:     u64,
+    pub opened_at:     Id,
     pub prim:          String,
     pub prim_amount:   f64,
     pub proper:        String,
@@ -399,9 +399,9 @@ pub fn log_row(
     path: &str,
     header: Option<&str>,
     kind: &str,
-    pivot_id: Option<u32>,
-    close_id: Option<u32>,
-    opened_pivot_id: Option<u32>,
+    pivot_id: Option<Id>,
+    close_id: Option<Id>,
+    opened_pivot_id: Option<Id>,
     prim: &str,
     proper: &str,
     prim_amount: f64,
@@ -427,12 +427,12 @@ pub fn log_row(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn log_open(path: &str, header: Option<&str>, pivot_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
+pub fn log_open(path: &str, header: Option<&str>, pivot_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
     log_row(path, header, "OPEN", Some(pivot_id), None, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn log_close(path: &str, header: Option<&str>, pivot_id: u32, close_id: u32, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
+pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
     log_row(path, header, "CLOSE", None, Some(close_id), Some(pivot_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
 }
 
@@ -496,7 +496,7 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats
                 stats.total_opens += 1;
                 stats.total_gas_avax += gas_avax;
                 open_by_id.insert(pivot_id, OpenPivot {
-                    pivot_id, opened_at: ts,
+                    pivot_id, opened_at: ts as usize,
                     prim: prim.to_string(), prim_amount,
                     proper: proper.to_string(), proper_amount,
                 });
@@ -933,13 +933,13 @@ mod unit_tests {
 
     #[test]
     fn test_biggest_first_sorts_by_raw_proper_amount_descending() {
-        let make = |id: u32, proper_amount: f64| OpenPivot {
-            pivot_id: id as usize, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
+        let make = |id: Id, proper_amount: f64| OpenPivot {
+            pivot_id: id, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
             proper: "Y".into(), proper_amount,
         };
         let pivots = vec![make(1, 500_000.0), make(2, 0.005), make(3, 520_000.0)];
         let sorted = biggest_first(pivots);
-        let ids: Vec<u32> = sorted.iter().map(|p| p.pivot_id as u32).collect();
+        let ids: Vec<Id> = sorted.iter().map(|p| p.pivot_id).collect();
         assert_eq!(ids, vec![3, 1, 2], "should be ordered biggest proper_amount to smallest, raw number, no currency conversion");
     }
 

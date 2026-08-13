@@ -1,4 +1,4 @@
-use std::eprintln;
+use std::{eprint, eprintln};
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
@@ -6,6 +6,7 @@ use book::{
         err_utils::ErrStr,
         parse_args_add_banner,
 };
+use libs::types::util::Id;
 use trading::auto_trading::{
             TokenRegistry,
             parse_token_registry,
@@ -63,7 +64,7 @@ fn human_ts(epoch: u64) -> String {
         .unwrap_or_else(|| format!("(bad timestamp: {epoch})"))
 }
 
-fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)> {
+fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats)> {
     if !std::path::Path::new(path).exists() {
         return Err(format!(
             "Where is tvá's history? Could not find trade log at '{path}'. \
@@ -71,9 +72,7 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, 
              log file means the path is wrong, not that this is a fresh start. Refusing to run."
         ));
     }
-
-    let (opens, next_pivot_id, next_close_id, stats) = replay_log(path)?;
-    Ok((opens, next_pivot_id as u32, next_close_id as u32, stats))
+    replay_log(path)
 }
 
 //============================================================================
@@ -82,7 +81,7 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, 
 pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let wallet_address = wallet_address_from_env("TVA_WALLET_ADDRESS")?;
     let registry = load_token_registry()?; //calling this when calling div
-    let (open_pivots0, mut next_pivot_id, mut next_close_id, opening_stats) = replay_log_with_history_required(TRADE_LOG_PATH)?;
+    let (open_pivots0, mut next_pivot_id: Id, mut next_close_id: Id, opening_stats) = replay_log_with_history_required(TRADE_LOG_PATH)?;
     let open_pivots = biggest_first(open_pivots0);
 
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
@@ -155,7 +154,7 @@ fn assesment_report(opened_something: bool, running_stats: CumulativeStats, skip
     }
 }
 
-async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, registry: std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: u32, mut committed_btc: f64, committed_undead: f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
+async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, registry: std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: Id, mut committed_btc: f64, committed_undead: f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
     Ok(if snap.undead_available > UNDEAD_TRADE_AMOUNT {
         match attempt_trade_with_actual_amount(
             &wallet_address, &registry, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
@@ -181,7 +180,7 @@ async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, regist
     })
 }
 
-async fn btc_trade(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: &mut u32, committed_btc: f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
+async fn btc_trade(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: &mut Id, committed_btc: f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
     Ok(if snap.asset_available > BTC_TRADE_AMOUNT {
         let attempted_id = *next_pivot_id;
         match attempt_trade_with_actual_amount(
@@ -209,7 +208,7 @@ async fn btc_trade(dry_run: bool, debug: bool, wallet_address: &String, registry
     })
 }
 
-async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut u32, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) -> Result<(), String> {
+async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) -> Result<(), String> {
     Ok(match attempt_trade_with_actual_amount(
         wallet_address, registry, &pivot.proper, &pivot.prim,
         pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
@@ -243,7 +242,7 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
             }
 
             let snap = balance_snapshot(wallet_address, registry, BTC, *committed_btc, *committed_undead).await?;
-            log_close(TRADE_LOG_PATH, None, pivot.pivot_id as u32, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
+            log_close(TRADE_LOG_PATH, None, pivot.pivot_id, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
             *next_close_id += 1;
             *closed_something = true;
         }
