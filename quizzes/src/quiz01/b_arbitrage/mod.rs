@@ -14,7 +14,7 @@ use libs::{
 };
 use trading::auto_trading::{
                 TokenRegistry, parse_token_registry, token_entry,
-                wallet_address_from_env, wallet_balance, live_quote, execute_trade,
+                wallet_address_from_env, wallet_balance, kyber_swap, execute_trade,
                 balance_snapshot, BalanceSnapshot,
                 AttemptOutcome, attempt_trade_with_actual_amount,
                 biggest_first, now_ts, replay_log, log_open, log_close,
@@ -471,31 +471,31 @@ async fn run_trade_for_symbols(
         ));
     }
 
-    let quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
-    println!("Live quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", quote.amount_out);
+    let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
+    println!("Live swap: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
     println!("Your floor: {min_floor:.8} {to_symbol}");
 
-    if quote.amount_out < min_floor {
+    if swap.amount_out < min_floor {
         return Err(format!(
-            "Quote ({:.8} {to_symbol}) is below your floor ({min_floor:.8} {to_symbol}). \
+            "Swap ({:.8} {to_symbol}) is below your floor ({min_floor:.8} {to_symbol}). \
              That's not happening. No funds used.",
-            quote.amount_out
+            swap.amount_out
         ));
     }
 
     if dry_run {
-        println!(">>> DRY RUN: quote clears your floor. No keystore touched, nothing sent, no funds moved.");
+        println!(">>> DRY RUN: swap clears your floor. No keystore touched, nothing sent, no funds moved.");
         return Ok(());
     }
 
     if debug {
-        println!(">>> Quote clears your floor. Proceeding to execute.");
+        println!(">>> Swap clears your floor. Proceeding to execute.");
     }
 
     match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, KEYSTORE_PATH_VAR, debug).await {
         Ok((tx_hash, _gas_avax)) => {
             println!(">>> Trade complete. Tx hash: {tx_hash}");
-            log_trade_outcome(from_symbol, to_symbol, amount, quote.amount_out, &tx_hash);
+            log_trade_outcome(from_symbol, to_symbol, amount, swap.amount_out, &tx_hash);
             Ok(())
         }
         Err(e) => Err(e),
@@ -571,13 +571,13 @@ pub async fn run_calls_batch(root_url: &str, slippage_bps: u16, dry_run: bool, d
             ));
         }
 
-        let quote = live_quote(&registry, from_symbol, to_symbol, amount).await?;
-        println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} quoted (10%-gain floor {min_floor:.8})", call.ix, quote.amount_out);
-        if quote.amount_out < min_floor {
+        let swap = kyber_swap(&registry, from_symbol, to_symbol, amount).await?;
+        println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} swapped (10%-gain floor {min_floor:.8})", call.ix, swap.amount_out);
+        if swap.amount_out < min_floor {
             return Err(format!(
-                "Call #{}: quote ({:.8} {to_symbol}) is below its 10%-gain floor ({min_floor:.8} \
+                "Call #{}: swap ({:.8} {to_symbol}) is below its 10%-gain floor ({min_floor:.8} \
                  {to_symbol}). This is a go/no-go batch — one row failing means none execute. No funds moved.",
-                call.ix, quote.amount_out
+                call.ix, swap.amount_out
             ));
         }
 
@@ -632,7 +632,7 @@ enum Command {
 
 #[derive(Debug, Parser)]
 #[command(name = "arbitrage")]
-#[command(version = "0.14.0")]
+#[command(version = "0.15.0")]
 struct Args {
     /// No subcommand = full survey: walk every existing pool's log and
     /// close what's ready to close.
@@ -727,19 +727,19 @@ pub mod functional_tests {
     run!("wallet_balance", " (real ETH read against dedicated test wallet, read-only)", {
         let registry = load_token_registry()?;
         let balance = now(wallet_balance(TEST_WALLET, "ETH", &registry))?;
-        println!("\ttest wallet ETH balance: {balance:.6}");
+        println!("\ttest wallet ETH balance: {balance:.4}");
     });
 
-    run!("live_quote_eth_to_btc", " (real KyberSwap route, read-only, small ETH->BTC)", {
+    run!("amount_swapped_eth_to_btc", " (real KyberSwap route, read-only, small ETH->BTC)", {
         let registry = load_token_registry()?;
-        let quote = now(live_quote(&registry, "ETH", "BTC", 0.01))?;
-        println!("\t0.01 ETH -> {:.8} BTC right now (router: {})", quote.amount_out, quote.router_address);
+        let swap = now(kyber_swap(&registry, "ETH", "BTC", 0.01))?;
+        println!("\t0.01 ETH -> {:.4} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
-    run!("live_quote_btc_to_eth", " (real KyberSwap route, read-only, small BTC->ETH)", {
+    run!("amount_swapped_btc_to_eth", " (real KyberSwap route, read-only, small BTC->ETH)", {
         let registry = load_token_registry()?;
-        let quote = now(live_quote(&registry, "BTC", "ETH", 0.0001))?;
-        println!("\t0.0001 BTC -> {:.8} ETH right now (router: {})", quote.amount_out, quote.router_address);
+        let swap = now(kyber_swap(&registry, "BTC", "ETH", 0.0001))?;
+        println!("\t0.0001 BTC -> {:.4} ETH right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("trade_by_row_dry_run", " (real calls.csv fetch, real row, read-only per-row check)", {
