@@ -324,7 +324,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.15.0")]
+#[command(version = "0.20.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -395,7 +395,7 @@ mod unit_tests {
         let path_str = path.to_str().unwrap();
         std::fs::write(
             &path,
-            "1970-01-01 00:16:40\tOPEN\t1\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
+            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
         ).map_err(|e| format!("could not write test fixture: {e}"))?;
 
         let (opens, next_pivot, _, stats) = replay_log_with_history_required(path_str)?;
