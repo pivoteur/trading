@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use book::{
         err_utils::ErrStr,
         file_utils::lines_from_file,
+        string_utils::s,
         utils::get_env
 };
 use ethers::{
@@ -579,38 +580,33 @@ pub async fn attempt_trade_with_actual_amount(
 ) -> ErrStr<AttemptOutcome> {
     let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
     if swap.amount_out <= min_floor {
-        if debug {
-            eprintln!(
-                "[NOT CLEARED] Trade NOT cleared: {from_symbol} -> {to_symbol} swap {amount:.4} <= floor {floor:.4}",
-                amount = swap.amount_out,
-                floor = min_floor
-            );
-        }
+            debug_trade_result(None, "NOT CLEARED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
+    
         Ok(AttemptOutcome::NotCleared)
     } else {
         if dry_run {
-            if debug {
-                eprintln!(
-                    "[DRY-RUN] Trade would clear: {from_symbol} -> {to_symbol} swap {amount:.4} > floor {floor:.4}",
-                    amount = swap.amount_out,
-                    floor = min_floor
-                );
-            }
+                debug_trade_result(None, "DRY-RUN WOULD CLEAR", from_symbol, to_symbol, amount, &swap, min_floor, debug);
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: swap.amount_out })
         } else {
             let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
             let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
             let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
             let actual_received = balance_after - balance_before;
-            if debug {
-                eprintln!(
-                    "[EXECUTED] Trade executed: {from_symbol} -> {to_symbol} tx {tx_hash} actual received {received:.4} gas cost {gas:.6} AVAX",
-                    received = actual_received,
-                    gas = gas_avax
-                );
-            }
+                debug_trade_result(Some(&tx_hash), "EXECUTED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
         }
+    }
+}
+
+fn debug_trade_result(tx: Option<&str>, kind: &str, from_symbol: &str, to_symbol: &str, amount: f64, swap: &KyberSwap, min_floor: f64, debug: bool) {
+    if debug {
+        eprintln!(
+            "[{kind}] Trade {from_symbol} -> {to_symbol} {} swap {amount:.4} -> {amount_out:.4} (floor {floor:.4})",
+            if tx.is_some() { format!("tx {}", tx.unwrap()) } else { s("") },
+            amount = swap.amount_out,
+            amount_out = swap.amount_out,
+            floor = min_floor
+        );
     }
 }
 
