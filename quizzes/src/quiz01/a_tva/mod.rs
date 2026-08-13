@@ -387,7 +387,7 @@ pub mod functional_tests {
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::now };
-    use trading::auto_trading::{ wallet_balance, live_quote };
+    use trading::auto_trading::{ wallet_balance, kyber_swap };
 
     create_testing!("quiz01::a_tva");
 
@@ -413,14 +413,14 @@ pub mod functional_tests {
 
     run!("live_quote_undead_to_btc", " (real KyberSwap route, read-only, 500000 UNDEAD -> BTC)", {
         let registry = load_token_registry()?;
-        let quote = now(live_quote(&registry, "UNDEAD", "BTC", 500_000.0))?;
-        println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", quote.amount_out, quote.router_address);
+        let swap = now(kyber_swap(&registry, "UNDEAD", "BTC", 500_000.0))?;
+        println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("live_quote_btc_to_undead", " (real KyberSwap route, read-only, 0.005 BTC -> UNDEAD)", {
         let registry = load_token_registry()?;
-        let quote = now(live_quote(&registry, "BTC", "UNDEAD", 0.005))?;
-        println!("\t0.005 BTC -> {:.2} UNDEAD right now (router: {})", quote.amount_out, quote.router_address);
+        let swap = now(kyber_swap(&registry, "BTC", "UNDEAD", 0.005))?;
+        println!("\t0.005 BTC -> {:.2} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("cycle_dry_run", " (real balances + quotes, never touches keystore)", {

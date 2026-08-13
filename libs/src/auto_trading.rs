@@ -180,18 +180,18 @@ pub async fn wallet_balance(
 //============================================================================
 /// A live quote plus everything needed to actually build and sign the swap
 /// afterward.
-pub struct KyberQuote {
+pub struct KyberSwap {
     pub amount_out:         f64,
     pub route_summary_raw:  serde_json::Value,
     pub router_address:     String,
 }
 
-pub async fn live_quote(
+pub async fn kyber_swap(
     registry: &TokenRegistry,
     from_symbol: &str,
     to_symbol: &str,
     amount: f64,
-) -> ErrStr<KyberQuote> {
+) -> ErrStr<KyberSwap> {
     let from_entry = token_entry(registry, from_symbol)?;
     let to_entry = token_entry(registry, to_symbol)?;
     let token_in = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?;
@@ -242,7 +242,7 @@ pub async fn live_quote(
         .map_err(|_| format!("Could not parse amountOut '{amount_out_str}'"))?;
     let amount_out = raw as f64 / 10f64.powi(to_entry.decimals as i32);
 
-    Ok(KyberQuote { amount_out, route_summary_raw, router_address })
+    Ok(KyberSwap { amount_out, route_summary_raw, router_address })
 }
 
 //============================================================================
@@ -577,13 +577,12 @@ pub async fn attempt_trade_with_actual_amount(
     dry_run: bool,
     debug: bool,
 ) -> ErrStr<AttemptOutcome> {
-    let quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
-    if quote.amount_out <= min_floor {
+    let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
+    if swap.amount_out <= min_floor {
         if debug {
             eprintln!(
-                "[NOT CLEARED] Trade NOT cleared: {from_symbol} -> {to_symbol} quote {quoted:.4} amount out {amount:.4} <= floor {floor:.4}",
-                quoted = quote.amount_out,
-                amount = quote.amount_out,
+                "[NOT CLEARED] Trade NOT cleared: {from_symbol} -> {to_symbol} swap {amount:.4} <= floor {floor:.4}",
+                amount = swap.amount_out,
                 floor = min_floor
             );
         }
@@ -592,13 +591,12 @@ pub async fn attempt_trade_with_actual_amount(
         if dry_run {
             if debug {
                 eprintln!(
-                    "[DRY-RUN] Trade would clear: {from_symbol} -> {to_symbol} quote {quoted:.4} amount out {amount:.4} > floor {floor:.4}",
-                    quoted = quote.amount_out,
-                    amount = quote.amount_out,
+                    "[DRY-RUN] Trade would clear: {from_symbol} -> {to_symbol} swap {amount:.4} > floor {floor:.4}",
+                    amount = swap.amount_out,
                     floor = min_floor
                 );
             }
-            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: quote.amount_out })
+            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: swap.amount_out })
         } else {
             let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
             let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
@@ -1066,7 +1064,7 @@ pub async fn execute_trade(
     if verbose {
         println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
     }
-    let fresh_quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
+    let fresh_quote = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
     if verbose {
         println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
     }
