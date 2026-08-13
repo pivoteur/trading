@@ -152,6 +152,8 @@ fn assesment_report(debug: bool, snap: BalanceSnapshot, opened_something: bool, 
             running_stats.total_gain_asset, running_stats.total_gain_undead
         );
     }
+    /* 
+    xxx
     if debug {
         println!(
             "Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.8}   UNDEAD {undead_vs_start:+.4}"
@@ -178,7 +180,8 @@ fn assesment_report(debug: bool, snap: BalanceSnapshot, opened_something: bool, 
         } else {
             println!("  Split preview — UNDEAD: no surplus above starting capital yet ({undead_vs_start:+.4})");
         }
-    }
+    } 
+    */
 }
 
 async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, registry: std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: u32, mut committed_btc: f64, committed_undead: f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
@@ -303,18 +306,17 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 
     if amount <= 0.0 {
         println!("  Nothing sendable right now (no surplus, or it's all committed to open pivots) — no transfer made.");
-        return Ok(());
     }
-
-    if dry_run {
-        if amount > 0.0 {
+    else {
+        
+        if dry_run {
             println!("  Would send {amount:.8} {token} to Vault. (dry run, no funds moved)");
         }
-        return Ok(());
+        else {   
+            let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
+            println!("  Sent {amount:.4} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
+        }
     }
-    
-    let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
-    println!("  Sent {amount:.4} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
     Ok(())
 }
 
