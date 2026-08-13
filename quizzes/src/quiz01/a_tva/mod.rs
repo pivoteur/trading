@@ -49,9 +49,6 @@ const KEYSTORE_PATH_VAR: &str = "TVA_KEYSTORE_PATH";
 const UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const BTC_TRADE_AMOUNT: f64 = 0.005;
 const SLIPPAGE_BPS: u16 = 200;
-const STARTING_UNDEAD: f64 = 5_000_000.0;
-const STARTING_BTC: f64 = 0.05;
-const ILLUSTRATIVE_SKIM_PCT: f64 = 0.25;
 const VAULT_ADDRESS: &str = "VAULT_ADDRESS";
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //============================================================================
@@ -126,20 +123,18 @@ pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     btc_trade(dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
     undead_trade(dry_run, debug, wallet_address, registry, next_pivot_id, committed_btc, committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
 
-    assesment_report(debug, snap, opened_something, running_stats, &skipped_open_reasons);
+    assesment_report(opened_something, running_stats, &skipped_open_reasons);
     
     Ok(())
 }
 
-fn assesment_report(debug: bool, snap: BalanceSnapshot, opened_something: bool, running_stats: CumulativeStats, skipped_open_reasons: &[String]) {
-    let btc_vs_start = snap.asset_balance - STARTING_BTC;
-    let undead_vs_start = snap.undead_balance - STARTING_UNDEAD;
+fn assesment_report(opened_something: bool, running_stats: CumulativeStats, skipped_open_reasons: &[String]) {
     if !opened_something {
         println!("  Nothing to open this cycle ({}) — see ya in an hour!", skipped_open_reasons.join("; "));
     }
     
     println!(
-        "Totals = {} closes, {} opens   gain BTC {:+.8}   gain UNDEAD {:+.4}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
+        "[REPORT] Totals = {} closes, {} opens   gain BTC {:+.4}   gain UNDEAD {:+.4}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
         running_stats.total_closes, running_stats.total_opens,
         running_stats.total_gain_asset, running_stats.total_gain_undead, running_stats.total_gas_avax,
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
@@ -148,40 +143,10 @@ fn assesment_report(debug: bool, snap: BalanceSnapshot, opened_something: bool, 
     if running_stats.total_gain_asset < 0.0 || running_stats.total_gain_undead < 0.0 {
         println!(
             "  \u{26A0} WARNING: realized cumulative gain is negative — this is NOT a timing artifact, \
-             closes are actually losing money. BTC {:+.8}   UNDEAD {:+.4}",
+             closes are actually losing money. BTC {:+.4}   UNDEAD {:+.4}",
             running_stats.total_gain_asset, running_stats.total_gain_undead
         );
     }
-    /* 
-    xxx
-    if debug {
-        println!(
-            "Vs starting capital ({STARTING_UNDEAD} UNDEAD / {STARTING_BTC} BTC entrusted): BTC {btc_vs_start:+.8}   UNDEAD {undead_vs_start:+.4}"
-        );
-        println!();
-
-        let kept_pct = (1.0 - ILLUSTRATIVE_SKIM_PCT) * 100.0;
-        let sent_pct = ILLUSTRATIVE_SKIM_PCT * 100.0;
-        if btc_vs_start > 0.0 {
-            let btc_kept = btc_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
-            let btc_sent = btc_vs_start * ILLUSTRATIVE_SKIM_PCT;
-            println!(
-                "  Split preview (illustrative, no funds moved) — BTC kept {btc_kept:+.8} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {btc_sent:+.8}"
-            );
-        } else {
-            println!("  Split preview — BTC: no surplus above starting capital yet ({btc_vs_start:+.8})");
-        }
-        if undead_vs_start > 0.0 {
-            let undead_kept = undead_vs_start * (1.0 - ILLUSTRATIVE_SKIM_PCT);
-            let undead_sent = undead_vs_start * ILLUSTRATIVE_SKIM_PCT;
-            println!(
-                "  Split preview (illustrative, no funds moved) — UNDEAD kept {undead_kept:+.4} ({kept_pct:.0}%) and ({sent_pct:.0}%) to Vault {undead_sent:+.4}"
-            );
-        } else {
-            println!("  Split preview — UNDEAD: no surplus above starting capital yet ({undead_vs_start:+.4})");
-        }
-    } 
-    */
 }
 
 async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, registry: std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: u32, mut committed_btc: f64, committed_undead: f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
@@ -282,7 +247,7 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
             divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, true, debug).await?; 
             let roi = gain / pivot.prim_amount;
             println!(
-                "  WOULD CLOSE  #{:<4} {:.8} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
+                "  WOULD CLOSE  #{:<4} {:.4} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
                 pivot.pivot_id, pivot.proper_amount, pivot.proper, quoted_amount_out, pivot.prim,
                 gain, pivot.prim, roi * 100.0
             );

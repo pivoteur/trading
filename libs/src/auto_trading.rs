@@ -579,19 +579,41 @@ pub async fn attempt_trade_with_actual_amount(
 ) -> ErrStr<AttemptOutcome> {
     let quote = live_quote(registry, from_symbol, to_symbol, amount).await?;
     if quote.amount_out <= min_floor {
-        return Ok(AttemptOutcome::NotCleared);
+        if debug {
+            eprintln!(
+                "[NOT CLEARED] Trade NOT cleared: {from_symbol} -> {to_symbol} quote {quoted:.4} amount out {amount:.4} <= floor {floor:.4}",
+                quoted = quote.amount_out,
+                amount = quote.amount_out,
+                floor = min_floor
+            );
+        }
+        Ok(AttemptOutcome::NotCleared)
+    } else {
+        if dry_run {
+            if debug {
+                eprintln!(
+                    "[DRY-RUN] Trade would clear: {from_symbol} -> {to_symbol} quote {quoted:.4} amount out {amount:.4} > floor {floor:.4}",
+                    quoted = quote.amount_out,
+                    amount = quote.amount_out,
+                    floor = min_floor
+                );
+            }
+            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: quote.amount_out })
+        } else {
+            let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
+            let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
+            let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
+            let actual_received = balance_after - balance_before;
+            if debug {
+                eprintln!(
+                    "[EXECUTED] Trade executed: {from_symbol} -> {to_symbol} tx {tx_hash} actual received {received:.4} gas cost {gas:.6} AVAX",
+                    received = actual_received,
+                    gas = gas_avax
+                );
+            }
+            Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
+        }
     }
-
-    if dry_run {
-        return Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: quote.amount_out });
-    }
-
-    let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
-    let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
-    let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
-    let actual_received = balance_after - balance_before;
-
-    Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
 }
 
 //============================================================================
