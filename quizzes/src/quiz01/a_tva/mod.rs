@@ -1,5 +1,4 @@
-use std::{eprint, eprintln};
-
+use std::eprintln;
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
@@ -72,7 +71,9 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, 
              log file means the path is wrong, not that this is a fresh start. Refusing to run."
         ));
     }
-    replay_log(path)
+
+    let (opens, next_pivot_id, next_close_id, stats) = replay_log(path)?;
+    Ok((opens, next_pivot_id as u32, next_close_id as u32, stats))
 }
 
 //============================================================================
@@ -242,7 +243,7 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
             }
 
             let snap = balance_snapshot(wallet_address, registry, BTC, *committed_btc, *committed_undead).await?;
-            log_close(TRADE_LOG_PATH, None, pivot.pivot_id, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
+            log_close(TRADE_LOG_PATH, None, pivot.pivot_id as u32, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
             *next_close_id += 1;
             *closed_something = true;
         }
@@ -297,7 +298,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.21.0")]
+#[command(version = "0.22.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,

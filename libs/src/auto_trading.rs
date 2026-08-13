@@ -260,7 +260,7 @@ pub async fn kyber_swap(
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
     pub pivot_id:      Id,
-    pub opened_at:     Id,
+    pub opened_at:     u64,
     pub prim:          String,
     pub prim_amount:   f64,
     pub proper:        String,
@@ -453,8 +453,8 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats
         .map_err(|e| format!("Could not open trade log at '{path}': {e}"))?;
 
     let mut open_by_id: HashMap<Id, OpenPivot> = HashMap::new();
-    let mut max_pivot_id: Id = 1;
-    let mut max_close_id: Id = 1;
+    let mut max_pivot_id: Id = 0;
+    let mut max_close_id: Id = 0;
     let mut stats = CumulativeStats::default();
 
     for (line_no, line) in lines.iter().enumerate() {
@@ -934,12 +934,12 @@ mod unit_tests {
     #[test]
     fn test_biggest_first_sorts_by_raw_proper_amount_descending() {
         let make = |id: u32, proper_amount: f64| OpenPivot {
-            pivot_id: id, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
+            pivot_id: id as usize, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
             proper: "Y".into(), proper_amount,
         };
         let pivots = vec![make(1, 500_000.0), make(2, 0.005), make(3, 520_000.0)];
         let sorted = biggest_first(pivots);
-        let ids: Vec<u32> = sorted.iter().map(|p| p.pivot_id).collect();
+        let ids: Vec<u32> = sorted.iter().map(|p| p.pivot_id as u32).collect();
         assert_eq!(ids, vec![3, 1, 2], "should be ordered biggest proper_amount to smallest, raw number, no currency conversion");
     }
 
