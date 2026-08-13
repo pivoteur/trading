@@ -270,7 +270,6 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
     let amount = compute_div_amount(pct, gain);
 
     println!("  div{mode_tag}: {pct:.1}% of sendable surplus -> Vault ({VAULT_ADDRESS})");
-    println!("    {token}   sending {amount:.8}");
 
     if amount <= 0.0 {
         println!("  Nothing sendable right now (no surplus, or it's all committed to open pivots) — no transfer made.");
@@ -278,7 +277,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
     else {
         
         if dry_run {
-            println!("  Would send {amount:.8} {token} to Vault. (dry run, no funds moved)");
+            println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault. (dry run, no funds moved)");
         }
         else {   
             let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
@@ -294,7 +293,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.20.0")]
+#[command(version = "0.21.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
