@@ -247,9 +247,8 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
             divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, true, debug).await?; 
             let roi = gain / pivot.prim_amount;
             println!(
-                "  WOULD CLOSE  #{:<4} {:.4} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
-                pivot.pivot_id, pivot.proper_amount, pivot.proper, quoted_amount_out, pivot.prim,
-                gain, pivot.prim, roi * 100.0
+                "  WOULD CLOSE  #{}   est. gain {gain:+.4}   est. roi {:.2}%",
+                pivot.pivot_id, roi * 100.0
             );
             *closed_something = true;
         }
