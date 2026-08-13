@@ -245,7 +245,8 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             let gain = actual_received - pivot.prim_amount;
-            divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, dry_run, debug).await?;
+            if dry_run { panic!("dry run should never return Executed — that would mean funds were actually moved!"); }
+            divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, false, debug).await?;
             let roi = gain / pivot.prim_amount;
             let days_held = (now_ts().saturating_sub(pivot.opened_at)) as f64 / 86_400.0;
             let apr = if days_held > 0.0 { roi * 365.0 / days_held } else { 0.0 };
@@ -277,6 +278,8 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
         }
         Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
             let gain = quoted_amount_out - pivot.prim_amount;
+            if !dry_run { panic!("not dry run should never return DryRunWouldClear — that would mean funds were actually moved!"); }
+            divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, true, debug).await?; 
             let roi = gain / pivot.prim_amount;
             println!(
                 "  WOULD CLOSE  #{:<4} {:.8} {} -> ~{:.4} {}   est. gain {:+.4} {}   est. roi {:.2}%   (dry run, no funds moved)",
