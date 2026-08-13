@@ -20,7 +20,7 @@ use ethers::{
         },
 };
 use serde::Deserialize;
-
+use libs::types::util::Id;
 //============================================================================
 //----- Token Registry --------------------------------------------------------
 //============================================================================
@@ -257,10 +257,10 @@ pub async fn kyber_swap(
 
 /// One open position: `proper` is what was spent to open it, `prim` is
 /// what closing it will swap back to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
-    pub pivot_id:      u32,
-    pub opened_at:     u64,
+    pub pivot_id:      Id,
+    pub opened_at:     Id,
     pub prim:          String,
     pub prim_amount:   f64,
     pub proper:        String,
@@ -273,8 +273,8 @@ pub struct OpenPivot {
 /// same for UNDEAD.
 #[derive(Debug, Clone, Default)]
 pub struct CumulativeStats {
-    pub total_opens:       u32,
-    pub total_closes:      u32,
+    pub total_opens:       usize,
+    pub total_closes:      usize,
     pub total_gain_asset:  f64,
     pub total_gain_undead: f64,
     pub total_gas_avax:    f64,
@@ -444,7 +444,7 @@ pub fn log_close(path: &str, header: Option<&str>, pivot_id: u32, close_id: u32,
 /// history (tvá, wired to one real pair) checks for the file itself
 /// before calling this and hard-errors on its own terms if it's missing —
 /// see e.g. tvá's `replay_log_with_history_required`.
-pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeStats)> {
+pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats)> {
     if !Path::new(path).exists() {
         return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
     }
@@ -452,9 +452,9 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeSta
     let lines = lines_from_file(path)
         .map_err(|e| format!("Could not open trade log at '{path}': {e}"))?;
 
-    let mut open_by_id: HashMap<u32, OpenPivot> = HashMap::new();
-    let mut max_pivot_id: u32 = 0;
-    let mut max_close_id: u32 = 0;
+    let mut open_by_id: HashMap<Id, OpenPivot> = HashMap::new();
+    let mut max_pivot_id: Id = 1;
+    let mut max_close_id: Id = 1;
     let mut stats = CumulativeStats::default();
 
     for (line_no, line) in lines.iter().enumerate() {
@@ -490,7 +490,7 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeSta
                 if !opened_pivot_id_field.is_empty() {
                     return Err(format!("OPEN at {path}:{} has a non-blank opened_pivot_id ('{opened_pivot_id_field}'): '{line}'", line_no + 1));
                 }
-                let pivot_id: u32 = pivot_id_field.parse()
+                let pivot_id: Id = pivot_id_field.parse()
                     .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
                 max_pivot_id = max_pivot_id.max(pivot_id);
                 stats.total_opens += 1;
@@ -505,9 +505,9 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, u32, u32, CumulativeSta
                 if !pivot_id_field.is_empty() {
                     return Err(format!("CLOSE at {path}:{} has a non-blank pivot_id ('{pivot_id_field}') — closes don't open a pivot, use opened_pivot_id: '{line}'", line_no + 1));
                 }
-                let close_id: u32 = fields[3].parse()
+                let close_id: Id = fields[3].parse()
                     .map_err(|_| format!("bad close_id at {path}:{}: '{line}'", line_no + 1))?;
-                let opened_pivot_id: u32 = opened_pivot_id_field.parse()
+                let opened_pivot_id: Id = opened_pivot_id_field.parse()
                     .map_err(|_| format!("bad opened_pivot_id at {path}:{}: '{line}'", line_no + 1))?;
                 let gain: f64 = fields[9].parse()
                     .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;

@@ -97,6 +97,7 @@ jobs:
         env:
           TVA_WALLET_ADDRESS:  ${{ secrets.TVA_WALLET_ADDRESS }}
           KEYSTORE_PASSWORD:   ${{ secrets.TVA_KEYSTORE_PASSWORD }}
+          VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
         run: |
           # github.event.inputs is only populated on workflow_dispatch — it's
           # empty on schedule (or any other trigger). Defaulting to dry-run
