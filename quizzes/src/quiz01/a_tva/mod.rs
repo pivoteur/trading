@@ -324,7 +324,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "1.1.0")]
+#[command(version = "0.20.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
