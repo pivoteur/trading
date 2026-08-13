@@ -11,8 +11,8 @@ on:
         description: 'Debug mode (verbose logging)?'
         type: boolean
         default: false
-  # schedule:
-    # - cron: "0 * * * *"
+  schedule:
+    - cron: "0 * * * *"
 
 env:
   DAPP: tva
