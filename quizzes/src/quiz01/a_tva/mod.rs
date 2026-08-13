@@ -164,7 +164,7 @@ async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, regist
                 *opened_something = true;
             }
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> ~{quoted_amount_out:.8} BTC   (dry run, no funds moved)");
+                println!("  WOULD OPEN  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> ~{quoted_amount_out:.8} BTC");
                 *opened_something = true;
             }
             Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: UNDEAD->BTC open quote didn't clear the near-zero floor — check the pool."),
@@ -191,7 +191,7 @@ async fn btc_trade(dry_run: bool, debug: bool, wallet_address: &String, registry
                 *opened_something = true;
             }
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> ~{quoted_amount_out:.2} UNDEAD   (dry run, no funds moved)");
+                println!("  WOULD OPEN  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> ~{quoted_amount_out:.2} UNDEAD");
                 *opened_something = true;
             }
             Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: BTC->UNDEAD open quote didn't clear the near-zero floor — check the pool."),
@@ -276,7 +276,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
     else {
         
         if dry_run {
-            println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault. (dry run, no funds moved)");
+            println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault.");
         }
         else {   
             let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
