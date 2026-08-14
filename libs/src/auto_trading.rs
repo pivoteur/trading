@@ -260,7 +260,7 @@ pub async fn kyber_swap(
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
     pub pivot_id:      Id,
-    pub opened_at:     Id,
+    pub opened_at:     u64,
     pub prim:          String,
     pub prim_amount:   f64,
     pub proper:        String,
@@ -496,7 +496,7 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats
                 stats.total_opens += 1;
                 stats.total_gas_avax += gas_avax;
                 open_by_id.insert(pivot_id, OpenPivot {
-                    pivot_id, opened_at: ts as usize,
+                    pivot_id, opened_at: ts,
                     prim: prim.to_string(), prim_amount,
                     proper: proper.to_string(), proper_amount,
                 });

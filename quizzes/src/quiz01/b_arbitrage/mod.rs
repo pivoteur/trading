@@ -159,7 +159,7 @@ async fn run_pool_cycle(
                 }
 
                 let snap = balance_snapshot(wallet_address, registry, token, committed_token, committed_undead).await?;
-                log_close(&path, Some(LOG_HEADER), pivot.pivot_id as u32, next_close_id as u32, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
+                log_close(&path, Some(LOG_HEADER), pivot.pivot_id, next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &running_stats);
                 next_close_id += 1;
                 closed_something = true;
             }
@@ -373,7 +373,7 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
             running_stats.total_opens += 1;
             running_stats.total_gas_avax += gas_avax;
             let snap = balance_snapshot(&wallet_address, &registry, &token, 0.0, actual_received).await?;
-            log_open(&path, Some(LOG_HEADER), next_pivot_id as u32, &token, amount, UNDEAD, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
+            log_open(&path, Some(LOG_HEADER), next_pivot_id, &token, amount, UNDEAD, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
             next_pivot_id += 1;
             actual_received
         }
@@ -396,7 +396,7 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
             running_stats.total_opens += 1;
             running_stats.total_gas_avax += gas_avax;
             let snap = balance_snapshot(&wallet_address, &registry, &token, actual_received, undead_received).await?;
-            log_open(&path, Some(LOG_HEADER), next_pivot_id as u32, UNDEAD, undead_received, &token, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
+            log_open(&path, Some(LOG_HEADER), next_pivot_id, UNDEAD, undead_received, &token, actual_received, gas_avax, &tx_hash, &snap, &running_stats);
         }
         AttemptOutcome::DryRunWouldClear { quoted_amount_out } => {
             println!("  WOULD OPEN  #{next_pivot_id:<4} {undead_received:.2} UNDEAD -> ~{quoted_amount_out:.8} {token}   (dry run, no funds moved)");

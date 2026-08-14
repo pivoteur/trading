@@ -1,4 +1,4 @@
-use std::{eprint, eprintln};
+use std::eprintln;
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
@@ -81,7 +81,7 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, I
 pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let wallet_address = wallet_address_from_env("TVA_WALLET_ADDRESS")?;
     let registry = load_token_registry()?; //calling this when calling div
-    let (open_pivots0, mut next_pivot_id: Id, mut next_close_id: Id, opening_stats) = replay_log_with_history_required(TRADE_LOG_PATH)?;
+    let (open_pivots0, mut next_pivot_id, mut next_close_id, opening_stats) = replay_log_with_history_required(TRADE_LOG_PATH)?;
     let open_pivots = biggest_first(open_pivots0);
 
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
