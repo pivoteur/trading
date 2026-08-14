@@ -632,7 +632,7 @@ enum Command {
 
 #[derive(Debug, Parser)]
 #[command(name = "arbitrage")]
-#[command(version = "0.15.0")]
+#[command(version = "0.16.0")]
 struct Args {
     /// No subcommand = full survey: walk every existing pool's log and
     /// close what's ready to close.
