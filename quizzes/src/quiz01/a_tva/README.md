@@ -53,6 +53,10 @@ converts it to your system's local time.
 
 ## Revisions
 
+* 0.24.0, 2026-08-15: after all tests pased - beta-reduction of two duplicate
+functions doing the same thing.
+* 0.23.0, 2026-08-15: hot-fix to address negative gain and I also corrected
+the decimals as the inconsistent precision was casuing weird rounding.
 * 0.13.0, 2026-08-07: `--debug` flag added — default output trimmed to
 trade events plus one summary line; the full per-cycle breakdown (wallet
 status, totals, vs starting capital, split preview) is now opt-in. `div`

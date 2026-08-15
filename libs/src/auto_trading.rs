@@ -562,6 +562,19 @@ pub enum AttemptOutcome {
     Executed { tx_hash: String, actual_received: f64, gas_avax: f64 },
 }
 
+/// The router is authorized (via `slippageTolerance` in `kyberswap_build`)
+/// to settle as low as `quote * (1 - slippage_bps/10000)` and still count
+/// as a success -- that's what "slippage tolerance" means on-chain. A
+/// quote is only a real guarantee of `min_floor` if it clears `min_floor`
+/// by more than that tolerance; checking the raw quote against `min_floor`
+/// lets a trade clear pre-trade and still settle under floor post-trade
+/// (observed: a tvá close settled 0.29% under floor, well inside its 2%
+/// tolerance). This raises the bar the quote must clear so the worst case
+/// the router allows still meets `min_floor`.
+fn slippage_adjusted_floor(min_floor: f64, slippage_bps: u16) -> f64 {
+    min_floor / (1.0 - slippage_bps as f64 / 10_000.0)
+}
+
 /// Quotes, checks the floor, and (unless dry-running) executes — the one
 /// trade-attempt pipeline every pivot open/close in this system goes
 /// through, regardless of which binary is calling it.
@@ -578,10 +591,11 @@ pub async fn attempt_trade_with_actual_amount(
     dry_run: bool,
     debug: bool,
 ) -> ErrStr<AttemptOutcome> {
+    let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
-    if swap.amount_out <= min_floor {
+    if swap.amount_out <= guaranteed_floor {
             debug_trade_result(None, "NOT CLEARED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
-    
+
         Ok(AttemptOutcome::NotCleared)
     } else {
         if dry_run {
@@ -915,6 +929,24 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_slippage_adjusted_floor_raises_the_bar_by_the_tolerance() {
+        // 200 bps = 2% tolerance: a quote must clear floor/0.98 so that
+        // even a 2%-worse settlement still lands at or above floor.
+        let floor = 500_000.0;
+        let adjusted = slippage_adjusted_floor(floor, 200);
+        assert!((adjusted - 500_000.0 / 0.98).abs() < 1e-6);
+        // The tvá loss this fixes: a quote of 500,700 (0.14% above floor)
+        // used to clear a raw 500,000 floor check, then settled 0.29%
+        // under floor at 2% slippage. It must NOT clear the adjusted floor.
+        assert!(500_700.0 <= adjusted, "a quote only 0.14% above floor must not clear a 2%-tolerance floor");
+    }
+
+    #[test]
+    fn test_slippage_adjusted_floor_is_a_noop_at_zero_slippage() {
+        assert_eq!(slippage_adjusted_floor(500_000.0, 0), 500_000.0);
+    }
+
+    #[test]
     fn test_pad_address_for_call_produces_32_byte_word() {
         let padded = pad_address_for_call("0x69b21DC480CA62E478D997d7313061F765a5B122");
         assert_eq!(padded.len(), 64);
@@ -1063,11 +1095,17 @@ pub async fn execute_trade(
     if verbose {
         println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
     }
-    if fresh_quote.amount_out < min_floor {
+    // See slippage_adjusted_floor: the swap below is authorized (via
+    // slippage_bps) to settle as low as fresh_quote * (1 - slippage_bps),
+    // so the fresh quote itself must clear that worse case, not just
+    // min_floor, or a real close can settle under floor.
+    let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
+    if fresh_quote.amount_out < guaranteed_floor {
         return Err(format!(
-            "Quote moved below your floor while unlocking the keystore ({:.8} {to_symbol} < {min_floor:.8} {to_symbol}). \
+            "Quote moved below your floor while unlocking the keystore ({:.8} {to_symbol} quoted, but only {:.8} {to_symbol} is guaranteed at {slippage_bps} bps slippage tolerance -- need > {min_floor:.8} {to_symbol}). \
              That's not happening. No funds used.",
-            fresh_quote.amount_out
+            fresh_quote.amount_out,
+            fresh_quote.amount_out * (1.0 - slippage_bps as f64 / 10_000.0)
         ));
     }
 
