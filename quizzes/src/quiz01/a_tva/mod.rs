@@ -116,7 +116,7 @@ pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     if debug {
         println!();
         println!(
-            "Wallet's Status = BTC {:.6} in wallet ({:.6} committed, {:.6} available) | UNDEAD {:.2} in wallet ({:.2} committed, {:.2} available)",
+            "Wallet's Status = BTC {:.4} in wallet ({:.4} committed, {:.4} available) | UNDEAD {:.8} in wallet ({:.8} committed, {:.8} available)",
             snap.asset_balance, snap.asset_committed, snap.asset_available, snap.undead_balance, snap.undead_committed, snap.undead_available
         );
         println!();
@@ -142,7 +142,7 @@ fn assesment_report(opened_something: bool, running_stats: CumulativeStats, skip
     }
     
     println!(
-        "[REPORT] Totals = {} closes, {} opens   gain BTC {:+.4}   gain UNDEAD {:+.4}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
+        "[REPORT] Totals = {} closes, {} opens   gain BTC {:+.4}   gain UNDEAD {:+.8}   gas {:.5} AVAX   avg roi {:.2}%   avg apr {:.2}%",
         running_stats.total_closes, running_stats.total_opens,
         running_stats.total_gain_asset, running_stats.total_gain_undead, running_stats.total_gas_avax,
         running_stats.avg_roi() * 100.0, running_stats.avg_apr() * 100.0
@@ -151,15 +151,15 @@ fn assesment_report(opened_something: bool, running_stats: CumulativeStats, skip
     if running_stats.total_gain_asset < 0.0 || running_stats.total_gain_undead < 0.0 {
         println!(
             "  \u{26A0} WARNING: realized cumulative gain is negative — this is NOT a timing artifact, \
-             closes are actually losing money. BTC {:+.4}   UNDEAD {:+.4}",
+             closes are actually losing money. BTC {:+.4}   UNDEAD {:+.8}",
             running_stats.total_gain_asset, running_stats.total_gain_undead
         );
     }
 }
 
-/// BTC shows 8 decimals, UNDEAD 2 -- everywhere an amount of either is printed.
+/// UNDEAD shows 8 decimals, BTC 4
 fn amount_decimals(token: &str) -> usize {
-    if token == BTC { 8 } else { 2 }
+    if token == UNDEAD { 8 } else { 4 }
 }
 
 /// Attempts to open one pivot `from` -> `to`. Shared by both legs tvá
@@ -212,7 +212,7 @@ async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, regis
             let days_held = (now_ts().saturating_sub(pivot.opened_at)) as f64 / 86_400.0;
             let apr = if days_held > 0.0 { roi * 365.0 / days_held } else { 0.0 };
             println!(
-                "  CLOSED  #{:<4} {:.4} {} -> {:.4} {}   gain {:+.4} {}   roi {:.2}%   apr {:.1}%   gas {:.5} AVAX",
+                "  CLOSED  #{:<4} {:.4} {} -> {:.4} {}   gain {:+.4} {}   roi {:.2}%   apr {:.2}%   gas {:.5} AVAX",
                 pivot.pivot_id, pivot.proper_amount, pivot.proper, actual_received, pivot.prim,
                 gain, pivot.prim, roi * 100.0, apr * 100.0, gas_avax
             );
@@ -264,7 +264,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
     let amount = compute_div_amount(pct, gain);
 
-    println!("  div{mode_tag}: {pct:.1}% of sendable surplus -> Vault ({VAULT_ADDRESS})");
+    println!("  div{mode_tag}: {pct:.2}% of sendable surplus -> Vault ({VAULT_ADDRESS})");
 
     if amount <= 0.0 {
         println!("  Nothing sendable right now (no surplus, or it's all committed to open pivots) — no transfer made.");
@@ -276,7 +276,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
         }
         else {   
             let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
-            println!("  Sent {amount:.4} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
+            println!("  Sent {amount:.8} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
         }
     }
     Ok(())
@@ -415,7 +415,7 @@ pub mod functional_tests {
     run!("live_quote_btc_to_undead", " (real KyberSwap route, read-only, 0.005 BTC -> UNDEAD)", {
         let registry = load_token_registry()?;
         let swap = now(kyber_swap(&registry, "BTC", "UNDEAD", 0.005))?;
-        println!("\t0.005 BTC -> {:.2} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
+        println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("cycle_dry_run", " (real balances + quotes, never touches keystore)", {
