@@ -125,8 +125,11 @@ pub async fn run_cycle(pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let mut opened_something = false;
     let mut skipped_open_reasons: Vec<String> = Vec::new();
 
-    btc_trade(dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
-    undead_trade(dry_run, debug, wallet_address, registry, next_pivot_id, committed_btc, committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
+    let btc_available = snap.asset_available;
+    open_trade(dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, BTC, UNDEAD, BTC_TRADE_AMOUNT, btc_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
+
+    let undead_available = snap.undead_available;
+    open_trade(dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, undead_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await?;
 
     assesment_report(opened_something, running_stats, &skipped_open_reasons);
     
@@ -154,58 +157,46 @@ fn assesment_report(opened_something: bool, running_stats: CumulativeStats, skip
     }
 }
 
-async fn undead_trade(dry_run: bool, debug: bool, wallet_address: String, registry: std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: Id, mut committed_btc: f64, committed_undead: f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
-    Ok(if snap.undead_available > UNDEAD_TRADE_AMOUNT {
-        match attempt_trade_with_actual_amount(
-            &wallet_address, &registry, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
-        ).await {
-            Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
-                println!("  OPENED  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> {actual_received:.8} BTC   gas {gas_avax:.5} AVAX");
-                committed_btc += actual_received;
-                running_stats.total_opens += 1;
-                running_stats.total_gas_avax += gas_avax;
-                *snap = balance_snapshot(&wallet_address, &registry, BTC, committed_btc, committed_undead).await?;
-                log_open(TRADE_LOG_PATH, None, next_pivot_id, UNDEAD, UNDEAD_TRADE_AMOUNT, BTC, actual_received, gas_avax, &tx_hash, &*snap, &*running_stats);
-                *opened_something = true;
-            }
-            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{next_pivot_id:<4} {UNDEAD_TRADE_AMOUNT:.2} UNDEAD -> ~{quoted_amount_out:.8} BTC");
-                *opened_something = true;
-            }
-            Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: UNDEAD->BTC open quote didn't clear the near-zero floor — check the pool."),
-            Err(e) => println!("  ! open (UNDEAD->BTC) failed: {e}"),
-        }
-    } else {
-        skipped_open_reasons.push(format!("UNDEAD free balance {:.2} <= {UNDEAD_TRADE_AMOUNT}", snap.undead_available));
-    })
+/// BTC shows 8 decimals, UNDEAD 2 -- everywhere an amount of either is printed.
+fn amount_decimals(token: &str) -> usize {
+    if token == BTC { 8 } else { 2 }
 }
 
-async fn btc_trade(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_pivot_id: &mut Id, committed_btc: f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> Result<(), String> {
-    Ok(if snap.asset_available > BTC_TRADE_AMOUNT {
-        let attempted_id = *next_pivot_id;
-        match attempt_trade_with_actual_amount(
-            wallet_address, registry, BTC, UNDEAD, BTC_TRADE_AMOUNT, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
-        ).await {
-            Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
-                println!("  OPENED  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
-                *committed_undead += actual_received;
-                running_stats.total_opens += 1;
-                running_stats.total_gas_avax += gas_avax;
-                *snap = balance_snapshot(wallet_address, registry, BTC, committed_btc, *committed_undead).await?;
-                log_open(TRADE_LOG_PATH, None, attempted_id, BTC, BTC_TRADE_AMOUNT, UNDEAD, actual_received, gas_avax, &tx_hash, &*snap, &*running_stats);
-                *opened_something = true;
-            }
-            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
-                println!("  WOULD OPEN  #{attempted_id:<4} {BTC_TRADE_AMOUNT:.8} BTC -> ~{quoted_amount_out:.2} UNDEAD");
-                *opened_something = true;
-            }
-            Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: BTC->UNDEAD open quote didn't clear the near-zero floor — check the pool."),
-            Err(e) => println!("  ! open (BTC->UNDEAD) failed: {e}"),
+/// Attempts to open one pivot `from` -> `to`. Shared by both legs tvá
+/// opens (BTC->UNDEAD and UNDEAD->BTC) -- same quote/execute/log flow,
+/// only the direction, size, and which committed total gets credited differ.
+#[allow(clippy::too_many_arguments)]
+async fn open_trade(dry_run: bool, debug: bool, wallet_address: &str, registry: &TokenRegistry, next_pivot_id: &mut Id, from: &str, to: &str, amount: f64, available: f64, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) -> ErrStr<()> {
+    if available <= amount {
+        let decimals = amount_decimals(from);
+        skipped_open_reasons.push(format!("{from} free balance {available:.decimals$} <= {amount}"));
+        return Ok(());
+    }
+
+    let pivot_id = *next_pivot_id;
+    let from_dp = amount_decimals(from);
+    let to_dp = amount_decimals(to);
+    match attempt_trade_with_actual_amount(
+        wallet_address, registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
+    ).await {
+        Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
+            println!("  OPENED  #{pivot_id:<4} {amount:.from_dp$} {from} -> {actual_received:.to_dp$} {to}   gas {gas_avax:.5} AVAX");
+            if to == BTC { *committed_btc += actual_received; } else { *committed_undead += actual_received; }
+            running_stats.total_opens += 1;
+            running_stats.total_gas_avax += gas_avax;
+            *snap = balance_snapshot(wallet_address, registry, BTC, *committed_btc, *committed_undead).await?;
+            log_open(TRADE_LOG_PATH, None, pivot_id, from, amount, to, actual_received, gas_avax, &tx_hash, &*snap, &*running_stats);
+            *opened_something = true;
         }
-        *next_pivot_id += 1;
-    } else {
-        skipped_open_reasons.push(format!("BTC free balance {:.6} <= {BTC_TRADE_AMOUNT}", snap.asset_available));
-    })
+        Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
+            println!("  WOULD OPEN  #{pivot_id:<4} {amount:.from_dp$} {from} -> ~{quoted_amount_out:.to_dp$} {to}");
+            *opened_something = true;
+        }
+        Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: {from}->{to} open quote didn't clear the near-zero floor — check the pool."),
+        Err(e) => println!("  ! open ({from}->{to}) failed: {e}"),
+    }
+    *next_pivot_id += 1;
+    Ok(())
 }
 
 async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) -> Result<(), String> {
@@ -297,7 +288,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
 #[command(bin_name = "tva")]
-#[command(version = "0.22.0")]
+#[command(version = "0.24.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -391,6 +382,7 @@ pub mod functional_tests {
     use paste::paste;
     use book::{ create_testing, utils::now };
     use trading::auto_trading::{ wallet_balance, kyber_swap };
+
 
     create_testing!("quiz01::a_tva");
 
