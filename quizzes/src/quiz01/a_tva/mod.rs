@@ -177,7 +177,7 @@ async fn open_trade(dry_run: bool, debug: bool, wallet_address: &str, registry: 
     let from_dp = amount_decimals(from);
     let to_dp = amount_decimals(to);
     match attempt_trade_with_actual_amount(
-        wallet_address, registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
+       "avalanche", wallet_address, registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  OPENED  #{pivot_id:<4} {amount:.from_dp$} {from} -> {actual_received:.to_dp$} {to}   gas {gas_avax:.5} AVAX");
@@ -201,7 +201,7 @@ async fn open_trade(dry_run: bool, debug: bool, wallet_address: &str, registry: 
 
 async fn pivot_survey(dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) -> Result<(), String> {
     Ok(match attempt_trade_with_actual_amount(
-        wallet_address, registry, &pivot.proper, &pivot.prim,
+        "avalanche", wallet_address, registry, &pivot.proper, &pivot.prim,
         pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
@@ -408,13 +408,13 @@ pub mod functional_tests {
 
     run!("live_quote_undead_to_btc", " (real KyberSwap route, read-only, 500000 UNDEAD -> BTC)", {
         let registry = load_token_registry()?;
-        let swap = now(kyber_swap(&registry, "UNDEAD", "BTC", 500_000.0))?;
+        let swap = now(kyber_swap("avalanche", &registry, "UNDEAD", "BTC", 500_000.0, true))?;
         println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("live_quote_btc_to_undead", " (real KyberSwap route, read-only, 0.005 BTC -> UNDEAD)", {
         let registry = load_token_registry()?;
-        let swap = now(kyber_swap(&registry, "BTC", "UNDEAD", 0.005))?;
+        let swap = now(kyber_swap("avalanche", &registry, "BTC", "UNDEAD", 0.005, true))?;
         println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
