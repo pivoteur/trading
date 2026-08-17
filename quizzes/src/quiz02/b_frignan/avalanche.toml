@@ -18,3 +18,7 @@ decimals = 18
 [UNDEAD]
 address = "0x5a3534720A4f29FA0dc53cE474Db88973A95f65C"
 decimals = 18
+
+[SAVAX]
+address = "0x2b2C81e08f1Af8835a78Bb2A90AE924ACE0eA4bE"
+decimals = 18
