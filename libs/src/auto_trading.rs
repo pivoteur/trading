@@ -6,6 +6,7 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use book::{
+    debug,
         err_utils::ErrStr,
         file_utils::lines_from_file,
         string_utils::s,
@@ -81,7 +82,9 @@ fn http_client() -> ErrStr<reqwest::Client> {
 //============================================================================
 pub const AVALANCHE_RPC: &str = "https://api.avax.network/ext/bc/C/rpc";
 pub const AVALANCHE_CHAIN_ID: u64 = 43114;
+/*
 const KYBERSWAP_CHAIN: &str = "avalanche";
+*/
 
 pub fn wallet_address_from_env(var_name: &str) -> ErrStr<String> {
     std::env::var(var_name).map_err(|_| {
@@ -188,11 +191,14 @@ pub struct KyberSwap {
 }
 
 pub async fn kyber_swap(
+    blockchain: &str,
     registry: &TokenRegistry,
     from_symbol: &str,
     to_symbol: &str,
     amount: f64,
+    debug: bool
 ) -> ErrStr<KyberSwap> {
+    debug!("kyber_swap", debug);
     let from_entry = token_entry(registry, from_symbol)?;
     let to_entry = token_entry(registry, to_symbol)?;
     let token_in = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?;
@@ -200,9 +206,10 @@ pub async fn kyber_swap(
     let amount_in_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
 
     let url = format!(
-        "https://aggregator-api.kyberswap.com/{KYBERSWAP_CHAIN}/api/v1/routes?tokenIn={token_in}&tokenOut={token_out}&amountIn={amount_in_base}"
+        "https://aggregator-api.kyberswap.com/{blockchain}/api/v1/routes?tokenIn={token_in}&tokenOut={token_out}&amountIn={amount_in_base}"
     );
 
+    log!("I am calling kyber...");
     let resp = http_client()?
         .get(&url)
         .header("X-Client-Id", "pivoteur-autotrader")
@@ -212,6 +219,7 @@ pub async fn kyber_swap(
         .await
         .map_err(|e| format!("KyberSwap route request failed: {e}"))?;
 
+        log!("kyber call completed with {:?}", resp);
     let status = resp.status();
     let raw_body = resp
         .text()
@@ -556,6 +564,7 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats
 //============================================================================
 //----- Shared Trade-Attempt Helper --------------------------------------------
 //============================================================================
+#[derive(Debug)]
 pub enum AttemptOutcome {
     NotCleared,
     DryRunWouldClear { quoted_amount_out: f64 },
@@ -580,6 +589,7 @@ fn slippage_adjusted_floor(min_floor: f64, slippage_bps: u16) -> f64 {
 /// through, regardless of which binary is calling it.
 #[allow(clippy::too_many_arguments)]
 pub async fn attempt_trade_with_actual_amount(
+    blockchain: &str,
     wallet_address: &str,
     registry: &TokenRegistry,
     from_symbol: &str,
@@ -592,7 +602,7 @@ pub async fn attempt_trade_with_actual_amount(
     debug: bool,
 ) -> ErrStr<AttemptOutcome> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
-    let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
+    let swap = kyber_swap(blockchain, registry, from_symbol, to_symbol, amount, debug).await?;
     if swap.amount_out <= guaranteed_floor {
             debug_trade_result(None, "NOT CLEARED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
 
@@ -603,7 +613,7 @@ pub async fn attempt_trade_with_actual_amount(
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: swap.amount_out })
         } else {
             let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
-            let (tx_hash, gas_avax) = execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
+            let (tx_hash, gas_avax) = execute_trade(blockchain, wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
             let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
             let actual_received = balance_after - balance_before;
                 debug_trade_result(Some(&tx_hash), "EXECUTED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
@@ -752,6 +762,7 @@ pub async fn approve_exact_amount(
 /// so it stays silent by default. `slippage_bps` is basis points (e.g.
 /// 50 = 0.50%).
 pub async fn kyberswap_build(
+    blockchain: &str,
     route_summary_raw: &serde_json::Value,
     sender: &str,
     slippage_bps: u16,
@@ -765,7 +776,7 @@ pub async fn kyberswap_build(
     });
 
     let resp = http_client()?
-        .post(format!("https://aggregator-api.kyberswap.com/{KYBERSWAP_CHAIN}/api/v1/route/build"))
+        .post(format!("https://aggregator-api.kyberswap.com/{blockchain}/api/v1/route/build"))
         .header("X-Client-Id", "pivoteur-autotrader")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .header("Content-Type", "application/json")
@@ -1070,6 +1081,7 @@ mod unit_tests {
 }
 
 pub async fn execute_trade(
+    blockchain: &str,
     wallet_address: &str,
     registry: &TokenRegistry,
     from_symbol: &str,
@@ -1091,7 +1103,7 @@ pub async fn execute_trade(
     if verbose {
         println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
     }
-    let fresh_quote = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
+    let fresh_quote = kyber_swap(blockchain, registry, from_symbol, to_symbol, amount, verbose).await?;
     if verbose {
         println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
     }
@@ -1122,7 +1134,7 @@ pub async fn execute_trade(
         println!(">>> Requesting swap calldata from KyberSwap...");
     }
     let (router, calldata) =
-        kyberswap_build(&fresh_quote.route_summary_raw, wallet_address, slippage_bps, verbose).await?;
+        kyberswap_build(blockchain, &fresh_quote.route_summary_raw, wallet_address, slippage_bps, verbose).await?;
 
     if verbose {
         println!(">>> Sending swap transaction...");
