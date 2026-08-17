@@ -129,7 +129,7 @@ async fn run_pool_cycle(
 
     for pivot in open_pivots {
         match attempt_trade_with_actual_amount(
-            wallet_address, registry, &pivot.proper, &pivot.prim,
+            "avalanche", wallet_address, registry, &pivot.proper, &pivot.prim,
             pivot.proper_amount, pivot.prim_amount, DEFAULT_SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
         ).await {
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
@@ -366,7 +366,7 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 1: TOKEN -> UNDEAD
     let undead_received = match attempt_trade_with_actual_amount(
-        &wallet_address, &registry, &token, UNDEAD, amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
+        "avalanche", &wallet_address, &registry, &token, UNDEAD, amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {amount:.8} {token} -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
@@ -389,7 +389,7 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 2: UNDEAD -> TOKEN, using exactly what pivot 1 returned — not a fresh quote.
     match attempt_trade_with_actual_amount(
-        &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
+        "avalanche", &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {undead_received:.2} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX");
@@ -471,7 +471,7 @@ async fn run_trade_for_symbols(
         ));
     }
 
-    let swap = kyber_swap(registry, from_symbol, to_symbol, amount).await?;
+    let swap = kyber_swap("avalanche", registry, from_symbol, to_symbol, amount, debug).await?;
     println!("Live swap: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
     println!("Your floor: {min_floor:.8} {to_symbol}");
 
@@ -492,7 +492,7 @@ async fn run_trade_for_symbols(
         println!(">>> Swap clears your floor. Proceeding to execute.");
     }
 
-    match execute_trade(wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, KEYSTORE_PATH_VAR, debug).await {
+    match execute_trade("avalanche", wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, KEYSTORE_PATH_VAR, debug).await {
         Ok((tx_hash, _gas_avax)) => {
             println!(">>> Trade complete. Tx hash: {tx_hash}");
             log_trade_outcome(from_symbol, to_symbol, amount, swap.amount_out, &tx_hash);
@@ -571,7 +571,7 @@ pub async fn run_calls_batch(root_url: &str, slippage_bps: u16, dry_run: bool, d
             ));
         }
 
-        let swap = kyber_swap(&registry, from_symbol, to_symbol, amount).await?;
+        let swap = kyber_swap("avalanche", &registry, from_symbol, to_symbol, amount, debug).await?;
         println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} swapped (10%-gain floor {min_floor:.8})", call.ix, swap.amount_out);
         if swap.amount_out < min_floor {
             return Err(format!(
@@ -732,13 +732,13 @@ pub mod functional_tests {
 
     run!("amount_swapped_eth_to_btc", " (real KyberSwap route, read-only, small ETH->BTC)", {
         let registry = load_token_registry()?;
-        let swap = now(kyber_swap(&registry, "ETH", "BTC", 0.01))?;
+        let swap = now(kyber_swap("avalanche", &registry, "ETH", "BTC", 0.01, true))?;
         println!("\t0.01 ETH -> {:.4} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("amount_swapped_btc_to_eth", " (real KyberSwap route, read-only, small BTC->ETH)", {
         let registry = load_token_registry()?;
-        let swap = now(kyber_swap(&registry, "BTC", "ETH", 0.0001))?;
+        let swap = now(kyber_swap("avalanche", &registry, "BTC", "ETH", 0.0001, true))?;
         println!("\t0.0001 BTC -> {:.4} ETH right now (router: {})", swap.amount_out, swap.router_address);
     });
 
