@@ -1,0 +1,19 @@
+[package]
+name = "frignan"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "frignan"
+path = "../../quizzes/src/quiz02/b_frignan/src/main.rs"
+
+[dependencies]
+book = { path = "../../../crypto-n-rust/src/libs/book" }
+trading = { path = "../../libs" }
+quizzes = { path = "../../quizzes" }
+
+clap = { version = "4.5", features = ["derive"] }
+tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
