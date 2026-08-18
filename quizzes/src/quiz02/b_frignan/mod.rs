@@ -22,7 +22,8 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "0.1.0")]
+#[command(bin_name = "frignan")]
+#[command(version = "0.2.0")]
 struct Args {
     from_token: UppercaseString,
     amount: f64,
