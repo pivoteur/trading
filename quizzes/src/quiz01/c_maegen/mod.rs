@@ -31,6 +31,7 @@ const DUST_EPSILON: f64 = 1e-8;
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
 const TRADE_LOG_HEADER: &str = "timestamp\tmode\ttoken\tundead_balance\ttoken_balance\ttoken_value_in_undead\tswap_undead\toutcome\tactual_received\tgas_avax\ttx_hash";
+const KEYSTORE_PATH_VAR: &str = "VAULT_KEYSTORE_PATH";
 
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
@@ -42,7 +43,7 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
 #[derive(Debug, Parser)]
-#[command(version = "0.7.0")]
+#[command(version = "0.8.0")]
 struct Args {
     blockchain: String,
     /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
@@ -84,17 +85,13 @@ fn log_run(
 fn token_value_in_undead(token_balance: f64, undead_quoted: f64, quote_out: f64) -> f64 {
     token_balance * undead_quoted / quote_out
 }
-
 /// Splits the UNDEAD-vs-token gap in half. Negative/zero means token is
 /// already at or ahead of parity -- never acted on, since this program only
 /// ever swaps UNDEAD -> token.
 fn compute_swap_amount(undead_balance: f64, token_value_in_undead: f64) -> f64 {
     (undead_balance - token_value_in_undead) / 2.0
 }
-
-
-/// Balances UNDEAD against `token` by swapping UNDEAD -> `token` only.
-/// No code path here ever calls `token -> UNDEAD`.
+//=====
 #[allow(clippy::too_many_arguments)]
 async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str, keystore_path: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
     let blockchains: HashMap<String, String> =
@@ -147,8 +144,10 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
 
     println!("  swapping {swap_amount:.8} UNDEAD -> {token}");
 
+    unsafe { std::env::set_var(KEYSTORE_PATH_VAR, keystore_path); }
+
     match attempt_trade_with_actual_amount(
-        &chain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, keystore_path, dry_run, debug,
+        &chain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  SWAPPED  {swap_amount:.8} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
