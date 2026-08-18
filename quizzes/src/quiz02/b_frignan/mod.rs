@@ -21,7 +21,7 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.0.3")]
+#[command(version = "1.0.4")]
 struct Args {
     from_token: UppercaseString,
     amount: f64,
@@ -78,5 +78,9 @@ pub mod functional_test {
 
     run!("frignan_functionailty", {
         now(runoff_continuation("avalanche", "BTC", 1.0, true))?
+    });
+
+    run!("frignan_undead", {
+        now(runoff_continuation("avalanche", "UNDEAD", 1.0, false))?
     });
 }
