@@ -1,8 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, println};
 use trading::auto_trading::{
-            attempt_trade_with_actual_amount, 
-            TokenRegistry,
-            parse_token_registry
+            AttemptOutcome::DryRunWouldClear, TokenRegistry, attempt_trade_with_actual_amount, parse_token_registry
 };
 use book::{
    parse_args_add_banner,
@@ -10,7 +8,8 @@ use book::{
    err_utils::ErrStr,
    string_utils::{UppercaseString,s},
    utils::get_env,
-   file_utils::read_file
+   file_utils::read_file,
+   currency::usd::mk_usd
 };
 use clap::Parser;
 
@@ -43,15 +42,26 @@ async fn runoff_continuation(blockchain: &str, from_token: &str, amount: f64, de
     let tokens = read_file(&format!("data/{}.toml", blockchain))?;
     let registry = load_token_registry(&tokens)?;
     let block = lookup(&blockchains);
-    let ans = attempt_trade_with_actual_amount(&block(&blockchain), &wallet_addy, &registry, &from_token, "USDC", amount, 0.0, 1000, &keystore_addy, true, debug).await;
-    println!("I gotch you, {ans:?}");
-    Ok(())
+    let ans = attempt_trade_with_actual_amount(&block(&blockchain), &wallet_addy, &registry, &from_token, "USDC", amount, 0.0, 1000, &keystore_addy, true, debug).await?;
+    if let DryRunWouldClear{quoted_amount_out} = ans{
+        let price = mk_usd(quoted_amount_out as f32);
+            println!("{from_token}'s price is {price}");
+        Ok(())
+    }else{
+        Err(format!("Could not resolve {ans:?}"))
+    }
 }
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
   runoff_continuation(&args.blockchain, &args.from_token, args.amount, args.debug).await
 }
+
+//=========================================================================
+// ----- UNIT TESTS ---------------------------------------------------------
+//=========================================================================
+// would dry_run clear
+// would dry_run fail
 
 //=========================================================================
 // ----- FUNCTIONAL TESTS --------------------------------------------------
