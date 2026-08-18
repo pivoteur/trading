@@ -12,7 +12,7 @@ where:
 * `AMOUNT` is the amount of `FROM_TOKEN` to quote |
 * `BLOCKCHAIN` is the chain name, e.g. `avalanche`, `binance` |
 
-* [source](../../quizzes/src/quiz02/b_frignan/mod.rs)
+* [source](../../quizzes/src/quiz02/mod.rs)
 
 Flags:
 
@@ -29,3 +29,7 @@ answer is Ok(DryRunWouldClear { quoted_amount_out: 64209.07... })
 * A `<blockchain>.toml` token registry file (e.g. `avalanche.toml`, `binance.toml`) must exist, listing each token's address and decimals.
 
 This is a dry run only — no funds are moved aka a price checker. 
+
+## Revisions
+
+* 1.0.3, 2026-08-18: moved into production
