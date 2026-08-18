@@ -6,7 +6,7 @@ Trades one token for another on a given blockchain, via KyberSwap.
 
 cargo run -- <BLOCKCHAIN> <FROM_TOKEN> <AMOUNT> <TO_TOKEN> [OPTIONS]
 
-* [source]("mod.rs")
+* [source](mod.rs)
 
 | Arg | Description |
 |---|---|
