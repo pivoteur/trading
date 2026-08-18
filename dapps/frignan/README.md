@@ -12,7 +12,7 @@ where:
 * `AMOUNT` is the amount of `FROM_TOKEN` to quote |
 * `BLOCKCHAIN` is the chain name, e.g. `avalanche`, `binance` |
 
-* [source](../../quizzes/src/quiz02/mod.rs)
+* [source](../../quizzes/src/quiz02/b_frignan/mod.rs)
 
 Flags:
 
