@@ -90,7 +90,7 @@ TSV — same shape and columns as `tvá`'s log (with `btc_*` generalized to
 header row is written automatically the first time a pool's log is
 created, so it's always there to copy straight into Google Sheets.
 
-* [source](mod.rs)
+* [source](../../quizzes/src/quiz01/b_arbitrage/mod.rs)
 
 ## Revisions
 
