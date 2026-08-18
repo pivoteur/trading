@@ -1,0 +1,12 @@
+[package]
+name = "c_ceap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+trading = { path = "../../../../libs" }
+book = { path = "../../../../../crypto-n-rust/src/libs/book" }
+quizzes = { path = "../../.." }
+
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
