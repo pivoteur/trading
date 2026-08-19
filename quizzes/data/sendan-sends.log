@@ -1,0 +1,2 @@
+timestamp	mode	blockchain	token	amount	to_address	outcome	actual_sent	gas_avax	tx_hash
+2026-08-19 18:00:41	DRY-RUN	avalanche	UNDEAD	1611240.40600000	0x28695b6193735f1dDa134864B653ff3a7466D107	WOULD_SEND	1611240.40600000	0.00000000	
