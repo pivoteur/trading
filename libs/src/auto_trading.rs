@@ -1024,10 +1024,13 @@ mod unit_tests {
     fn test_replay_log_misfire_does_not_create_an_open_pivot() -> ErrStr<()> {
         let path = std::env::temp_dir().join("auto_trading_test_misfire.log");
         let path_str = path.to_str().unwrap();
-        std::fs::write(
-            &path,
-            "1970-01-01 00:16:40\tMISFIRE\t\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00000000\t\t\t\t0.00000000\t\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+        let _ = std::fs::remove_file(&path); // clean slate -- log_misfire appends, it doesn't truncate
+        let snap = BalanceSnapshot {
+            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
+            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
+        };
+        let cum = CumulativeStats::default();
+        log_misfire(path_str, None, "UNDEAD", "BTC", 500_000.0, 0.0, "", &snap, &cum);
 
         let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
         assert!(opens.is_empty(), "a MISFIRE must never be replayed as a real open pivot");
@@ -1043,11 +1046,16 @@ mod unit_tests {
     #[test]
     fn test_replay_log_rejects_misfire_with_a_pivot_id() {
         let path = std::env::temp_dir().join("auto_trading_test_misfire_bad.log");
-        std::fs::write(
-            &path,
-            "1970-01-01 00:16:40\tMISFIRE\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00000000\t\t\t\t0.00000000\t\n",
-        ).unwrap();
-        let result = replay_log(path.to_str().unwrap());
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(&path);
+        let snap = BalanceSnapshot {
+            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
+            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
+        };
+        let cum = CumulativeStats::default();
+        log_row(path_str, None, "MISFIRE", Some(1), None, None, "UNDEAD", "BTC", 500_000.0, 0.0, None, None, None, 0.0, "", &snap, &cum);
+
+        let result = replay_log(path_str);
         assert!(result.is_err(), "a MISFIRE row must never carry a pivot_id -- that would make it indistinguishable from a real OPEN");
         let _ = std::fs::remove_file(&path);
     }
