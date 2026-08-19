@@ -1,31 +1,27 @@
-name: tva
+name: maegen
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run (no funds moved, no log entries written)?'
+        description: 'Dry run (no capital moved around/ touched)?'
         type: boolean
         default: false
       debug:
-        description: 'Debug mode (verbose logging)?'
+        description: 'Debug mode (show what is going on behind the scenes)?'
         type: boolean
         default: false
-      blockchain:
-        description: 'Which chain (data/{blockchain}.toml) to trade against?'
-        type: string
-        default: 'avalanche'
   schedule:
     - cron: "0 * * * *"
 
 env:
-  DAPP: tva
+  DAPP: maegen
 
 permissions:
   contents: write
 
 jobs:
-  run-tva:
+  run-maegen:
     runs-on: ubuntu-latest
 
     steps:
@@ -52,14 +48,14 @@ jobs:
       - name: Establish git path
         run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
 
-      - name: Cache tva binary
+      - name: Cache maegen binary
         id: binary-cache
         uses: actions/cache@v4
         with:
-          path: trading/dapps/tva/target/release/tva
+          path: trading/dapps/maegen/target/release/maegen
           key: >-
-            tva-binary-
-            ${{ hashFiles(format('{0}/quiz01/a_tva/**/*.rs', env.QUIZZES_SRC)) }}-
+            maegen-binary-
+            ${{ hashFiles(format('{0}/quiz01/c_maegen/**/*.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
@@ -79,30 +75,23 @@ jobs:
 
       - name: Show input parameters
         run: |
-          echo "=== Running tva with manual inputs ==="
+          echo "=== Running maegen with manual inputs ==="
           echo "dry_run: ${{ inputs.dry_run }}"
           echo "debug: ${{ inputs.debug }}"
-          echo "blockchain: ${{ inputs.blockchain }}"
-      - name: Build tva
+
+      - name: Build maegen
         if: steps.binary-cache.outputs.cache-hit != 'true'
         run: |
           cargo build --manifest-path $DAPP_DIR/Cargo.toml --bin $DAPP --release
 
-      - name: Add tva to PATH
+      - name: Add maegen to PATH
         run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
 
-      - name: Write keystore file from secret
+      - name: Run maegen
         env:
-          TVA_KEYSTORE_JSON: ${{ secrets.TVA_KEYSTORE_JSON }}
-        run: |
-          echo "$TVA_KEYSTORE_JSON" > "$RUNNER_TEMP/tva-keystore.json"
-          echo "TVA_KEYSTORE_PATH=$RUNNER_TEMP/tva-keystore.json" >> $GITHUB_ENV
-
-      - name: Run tva
-        env:
-          TVA_WALLET_ADDRESS:  ${{ secrets.TVA_WALLET_ADDRESS }}
-          KEYSTORE_PASSWORD:   ${{ secrets.TVA_KEYSTORE_PASSWORD }}
           VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
+          VAULT_KEYSTORE_PATH: ${{ secrets.VAULT_KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD:   ${{ secrets.VAULT_KEYSTORE_PASSWORD }}
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
@@ -111,33 +100,24 @@ jobs:
           if [ "${{ github.event.inputs.debug }}" = "true" ]; then
             ARGS="$ARGS --debug"
           fi
-          if [ -n "${{ github.event.inputs.blockchain }}" ]; then
-            ARGS="$ARGS --blockchain ${{ github.event.inputs.blockchain }}"
-          fi
-          ARGS="$ARGS div --pct 25"
-          echo "=== Running tva with args: $ARGS ==="
-          $DAPP $ARGS
-
-      - name: Delete keystore file
-        if: always()
-        run: rm -f "$RUNNER_TEMP/tva-keystore.json"
+          echo "=== Running maegen on avalanche with BTC --wallet-address **** --keystore-path **** $ARGS ==="
+          $DAPP avalanche BTC --wallet-address "$VAULT_ADDRESS" --keystore-path "$VAULT_KEYSTORE_PATH" $ARGS
 
       - name: Commit trade log to trading
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           USER0_NAME:     ${{ vars.USER0_NAME }}
           USER0_EMAIL:    ${{ secrets.USER0_EMAIL }}
-          PROTOCOL_TOKEN: ${{ secrets.PROTOCOL_TOKEN }}
         run: |
           cd trading
           git config --local user.name "$USER0_NAME"
           git config --local user.email "$USER0_EMAIL"
-          git add quizzes/data/tva-trades.log
+          git add data/maegen-undead-btc.log
 
           if git diff --staged --quiet; then
             echo "Nothing to commit, skipping push"
             exit 0
           fi
 
-          git commit -m "tva trade log update [skip ci]"
+          git commit -m "maegen trade log update [skip ci]"
           git push
