@@ -38,6 +38,14 @@ where:
   (0.50%) -- deliberately tighter than `tvá`'s `200`, since hourly runs are
   meant to be closing small gaps, not large ones.
 
+> n.b: the scheduled `maegen.yml` workflow always invokes this as
+> `maegen avalanche BTC`, and always passes `--wallet-address` /
+> `--keystore-path` explicitly, sourced from the `VAULT_ADDRESS` /
+> `VAULT_KEYSTORE_PATH` secrets -- **not** the `TVA_WALLET_ADDRESS` /
+> `TVA_KEYSTORE_PATH` defaults above. In production this never touches
+> tvá's wallet; those defaults only apply to a manual, local invocation
+> that omits `--wallet-address`/`--keystore-path` entirely.
+
 * [source](../../quizzes/src/quiz01/c_maegen/mod.rs)
 
 ## The math
