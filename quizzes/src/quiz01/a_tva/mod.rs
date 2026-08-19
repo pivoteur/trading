@@ -24,6 +24,7 @@ use trading::auto_trading::{
             replay_log,
             log_open,
             log_close,
+            log_misfire,
             UNDEAD,
             NO_REAL_FLOOR,
 };
@@ -195,7 +196,12 @@ async fn open_trade(blockchain: &str, dry_run: bool, debug: bool, wallet_address
             *opened_something = true;
         }
         Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: {from}->{to} open quote didn't clear the near-zero floor — check the pool."),
-        Err(e) => println!("  ! open ({from}->{to}) failed: {e}"),
+        Err(e) => {
+            println!("  ! open ({from}->{to}) failed: {e}");
+            if !dry_run {
+                log_misfire(TRADE_LOG_PATH, None, from, to, amount, 0.0, "", &*snap, &*running_stats);
+            }
+        }
     }
     *next_pivot_id += 1;
     Ok(())
@@ -254,6 +260,10 @@ async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_addre
         Ok(AttemptOutcome::NotCleared) => {}
         Err(e) => {
             println!("  ! close attempt for pivot #{} failed, staying open: {e}", pivot.pivot_id);
+            if !dry_run {
+                let snap = balance_snapshot(wallet_address, registry, BTC, *committed_btc, *committed_undead).await?;
+                log_misfire(TRADE_LOG_PATH, None, &pivot.prim, &pivot.proper, pivot.prim_amount, 0.0, "", &snap, &*running_stats);
+            }
         }
     })
 }
