@@ -38,7 +38,7 @@ where:
   (0.50%) -- deliberately tighter than `tvá`'s `200`, since hourly runs are
   meant to be closing small gaps, not large ones.
 
-* [source](mod.rs)
+* [source](../../quizzes/src/quiz01/c_maegen/mod.rs)
 
 ## The math
 
