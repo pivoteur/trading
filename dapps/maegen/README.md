@@ -1,4 +1,4 @@
-# `c_maegen`
+# `maegen`
 
 Keeps a wallet's UNDEAD and one other token at as close to a 50/50 USD-value
 split as possible, by swapping UNDEAD -> `<token>` -- **never** the other
