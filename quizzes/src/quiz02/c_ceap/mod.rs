@@ -15,9 +15,6 @@ use book::{
 use clap::Parser;
 
 
-//============================================================================
-// ----- const ----------------------------------------------------------------
-//============================================================================
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
 }
@@ -29,7 +26,7 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 //=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "0.1.0")]
+#[command(version = "0.1.1")]
 struct Args {
     blockchain: String,
     from_token: UppercaseString,
@@ -71,8 +68,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 // =======================================================================
 // ----- FUNCTIONAL TESTS --------------------------------------------------
 // =======================================================================
-#[cfg(test)]
 #[cfg(not(tarpaulin_include))]
+#[cfg(test)]
 pub mod functional_test {
     use super::*;
     use paste::paste;

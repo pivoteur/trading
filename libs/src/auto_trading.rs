@@ -54,37 +54,23 @@ pub fn token_entry<'a>(registry: &'a TokenRegistry, symbol: &str) -> ErrStr<&'a 
 //============================================================================
 //----- Shared Trading Constants -----------------------------------------------
 //============================================================================
-/// Every asset<->UNDEAD pool binary in this codebase (tvá, arbitrage)
-/// trades against UNDEAD as the fixed other leg.
 pub const UNDEAD: &str = "UNDEAD";
-
-/// Used for opening pivots, where there's no real floor to enforce yet —
-/// a near-zero floor means "accept whatever the live quote is," while
-/// still routing through the same clear-a-floor codepath as every other
-/// trade, rather than a separate unchecked path. Shared by every binary
-/// that opens fresh pivots (tvá, arbitrage).
 pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
-
 //============================================================================
 //----- Shared HTTP Client ----------------------------------------------------
 //============================================================================
 const HTTP_TIMEOUT_SECS: u64 = 15;
-
 fn http_client() -> ErrStr<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("Could not build HTTP client: {e}"))
 }
-
 //============================================================================
 //----- Wallet Balance Check --------------------------------------------------
 //============================================================================
 pub const AVALANCHE_RPC: &str = "https://api.avax.network/ext/bc/C/rpc";
 pub const AVALANCHE_CHAIN_ID: u64 = 43114;
-/*
-const KYBERSWAP_CHAIN: &str = "avalanche";
-*/
 
 pub fn wallet_address_from_env(var_name: &str) -> ErrStr<String> {
     std::env::var(var_name).map_err(|_| {
@@ -148,10 +134,6 @@ async fn erc20_balance(wallet_address: &str, token_contract: &str) -> ErrStr<u12
     hex_to_u128(&result)
 }
 
-/// Native-coin balance (AVAX itself, not a wrapped ERC-20) via the plain
-/// `eth_getBalance` RPC method — no contract call, no `address` needed in
-/// tokens.toml. `wallet_balance` below dispatches here automatically for
-/// any registry entry marked `native = true`.
 async fn native_coin_balance(wallet_address: &str) -> ErrStr<u128> {
     let result = rpc_call(
         "eth_getBalance",
@@ -257,14 +239,6 @@ pub async fn kyber_swap(
 //============================================================================
 //----- Shared Pivot & Trade-Cycle Types ---------------------------------------
 //============================================================================
-// Everything in this section used to be duplicated, near byte-for-byte,
-// between tvá's and arbitrage's mod.rs — the only differences were the
-// name of the non-UNDEAD leg ("BTC" for tvá's one fixed pair, "TOKEN" for
-// whichever pool arbitrage is working) and, for arbitrage, a `path` per
-// pool instead of one fixed log file. Both are now plain parameters.
-
-/// One open position: `proper` is what was spent to open it, `prim` is
-/// what closing it will swap back to.
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
     pub pivot_id:      Id,
@@ -275,10 +249,6 @@ pub struct OpenPivot {
     pub proper_amount: f64,
 }
 
-/// Running totals across a pivot log's whole history. `total_gain_asset`
-/// is the cumulative realized gain in whichever token isn't UNDEAD (BTC
-/// for tvá, the pool's token for arbitrage); `total_gain_undead` is the
-/// same for UNDEAD.
 #[derive(Debug, Clone, Default)]
 pub struct CumulativeStats {
     pub total_opens:       usize,
@@ -299,9 +269,6 @@ impl CumulativeStats {
     }
 }
 
-/// Wallet balances for one asset<->UNDEAD pair — `asset` is BTC for tvá
-/// (its one fixed pair) and whichever token a pool is keyed on for
-/// arbitrage (one pair per pool).
 #[derive(Debug, Clone, Copy)]
 pub struct BalanceSnapshot {
     pub asset_balance:    f64,
@@ -319,10 +286,7 @@ pub async fn balance_snapshot(
     asset_committed: f64,
     undead_committed: f64,
 ) -> ErrStr<BalanceSnapshot> {
-    // Two independent reads — nothing here depends on the other's result —
-    // so they run concurrently instead of one after another. This is only
-    // safe because both sides are reads; the trade-execution path stays
-    // sequential per wallet since signing needs nonces to land in order.
+    // Two independent reads
     let (asset_balance, undead_balance) = tokio::try_join!(
         wallet_balance(wallet_address, asset_symbol, registry),
         wallet_balance(wallet_address, UNDEAD, registry),
@@ -375,12 +339,6 @@ pub fn parse_log_ts(s: &str) -> ErrStr<u64> {
         .map_err(|e| format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}', e.g. '2026-08-05 14:32:07'): {e}"))
 }
 
-/// Appends one line to a trade log, creating the file on first write.
-/// `header` is `None` for logs that never had one (tvá's single fixed
-/// log) and `Some(..)` for logs that write a header the first time they're
-/// created (arbitrage's per-pool logs) — which one to pass is a caller
-/// choice, not a guess, since guessing wrong would silently corrupt an
-/// existing binary's log format.
 pub fn append_trade_log_line(path: &str, line: &str, header: Option<&str>) {
     let needs_header = header.is_some() && !Path::new(path).exists();
     let result = OpenOptions::new()
@@ -399,9 +357,6 @@ pub fn append_trade_log_line(path: &str, line: &str, header: Option<&str>) {
     }
 }
 
-/// Every row — OPEN, CLOSE or MISFIRE — uses this exact column layout. Only
-/// close_id/gain/roi/apr are ever blank (OPEN doesn't have them yet);
-/// everything else, including prim_amount, is filled on both row types.
 #[allow(clippy::too_many_arguments)]
 pub fn log_row(
     path: &str,
@@ -438,20 +393,15 @@ pub fn log_row(
 pub fn log_open(path: &str, header: Option<&str>, pivot_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
     log_row(path, header, "OPEN", Some(pivot_id), None, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
     log_row(path, header, "CLOSE", None, Some(close_id), Some(pivot_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
 }
+#[allow(clippy::too_many_arguments)]
+pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str, prim_amount: f64, proper_amount: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
+    log_row(path, header, "MISFIRE", None, None, None, prim, proper, prim_amount, proper_amount, None, None, None, 0.0, tx_hash, snap, cum);
+}
 
-/// Replays a pivot log from scratch — no in-memory state carried between
-/// runs, the log file itself is the source of truth. A missing file
-/// replays as empty (id counters starting at 1, zeroed stats): a fresh
-/// pool with no history yet is a valid starting state as far as this
-/// function is concerned. A binary that instead expects pre-existing
-/// history (tvá, wired to one real pair) checks for the file itself
-/// before calling this and hard-errors on its own terms if it's missing —
-/// see e.g. tvá's `replay_log_with_history_required`.
 pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats)> {
     if !Path::new(path).exists() {
         return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
@@ -571,15 +521,6 @@ pub enum AttemptOutcome {
     Executed { tx_hash: String, actual_received: f64, gas_avax: f64 },
 }
 
-/// The router is authorized (via `slippageTolerance` in `kyberswap_build`)
-/// to settle as low as `quote * (1 - slippage_bps/10000)` and still count
-/// as a success -- that's what "slippage tolerance" means on-chain. A
-/// quote is only a real guarantee of `min_floor` if it clears `min_floor`
-/// by more than that tolerance; checking the raw quote against `min_floor`
-/// lets a trade clear pre-trade and still settle under floor post-trade
-/// (observed: a tvá close settled 0.29% under floor, well inside its 2%
-/// tolerance). This raises the bar the quote must clear so the worst case
-/// the router allows still meets `min_floor`.
 fn slippage_adjusted_floor(min_floor: f64, slippage_bps: u16) -> f64 {
     min_floor / (1.0 - slippage_bps as f64 / 10_000.0)
 }
@@ -1076,6 +1017,46 @@ mod unit_tests {
         ).unwrap();
         let result = replay_log(path.to_str().unwrap());
         assert!(result.is_err(), "a CLOSE referencing a pivot_id with no prior OPEN should be a hard error, not silently ignored");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_replay_log_misfire_does_not_create_an_open_pivot() -> ErrStr<()> {
+        let path = std::env::temp_dir().join("auto_trading_test_misfire.log");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(&path); // clean slate -- log_misfire appends, it doesn't truncate
+        let snap = BalanceSnapshot {
+            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
+            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
+        };
+        let cum = CumulativeStats::default();
+        log_misfire(path_str, None, "UNDEAD", "BTC", 500_000.0, 0.0, "", &snap, &cum);
+
+        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
+        assert!(opens.is_empty(), "a MISFIRE must never be replayed as a real open pivot");
+        assert_eq!(next_pivot, 1, "id counters must not advance from a MISFIRE");
+        assert_eq!(next_close, 1);
+        assert_eq!(stats.total_opens, 0);
+        assert_eq!(stats.total_closes, 0);
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_replay_log_rejects_misfire_with_a_pivot_id() {
+        let path = std::env::temp_dir().join("auto_trading_test_misfire_bad.log");
+        let path_str = path.to_str().unwrap();
+        let _ = std::fs::remove_file(&path);
+        let snap = BalanceSnapshot {
+            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
+            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
+        };
+        let cum = CumulativeStats::default();
+        log_row(path_str, None, "MISFIRE", Some(1), None, None, "UNDEAD", "BTC", 500_000.0, 0.0, None, None, None, 0.0, "", &snap, &cum);
+
+        let result = replay_log(path_str);
+        assert!(result.is_err(), "a MISFIRE row must never carry a pivot_id -- that would make it indistinguishable from a real OPEN");
         let _ = std::fs::remove_file(&path);
     }
 }
