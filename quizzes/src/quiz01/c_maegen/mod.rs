@@ -40,7 +40,7 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
 #[derive(Debug, Parser)]
-#[command(version = "0.8.1")]
+#[command(version = "1.0.0")]
 struct Args {
     blockchain: String,
     /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
