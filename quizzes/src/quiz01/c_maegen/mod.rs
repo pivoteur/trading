@@ -24,6 +24,7 @@ use trading::auto_trading::{
 
 
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
+const MAX_SLIPPAGE_BPS: u16 = 500;
 const DUST_EPSILON: f64 = 1e-8;
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
@@ -56,8 +57,9 @@ struct Args {
     dry_run: bool,
     #[arg(long, default_value_t = false)]
     debug: bool,
+    /// hard-refused above MAX_SLIPPAGE_BPS (500 = 5%) -- see runoff_continuation
     #[arg(long, default_value_t = DEFAULT_SLIPPAGE_BPS)]
-    slippage_bps: u16,    
+    slippage_bps: u16,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -91,6 +93,15 @@ fn compute_swap_amount(undead_balance: f64, token_value_in_undead: f64) -> f64 {
 //=====
 #[allow(clippy::too_many_arguments)]
 async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str, keystore_path: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
+    // Hard refuse before anything else touches the wallet, a quote, or the
+    // keystore -- no partial work, no silent clamp down to the ceiling.
+    if slippage_bps > MAX_SLIPPAGE_BPS {
+        return Err(format!(
+            "slippage_bps {slippage_bps} exceeds the hard ceiling of {MAX_SLIPPAGE_BPS} ({:.2}%). That's not happening. No funds used.",
+            MAX_SLIPPAGE_BPS as f64 / 100.0
+        ));
+    }
+
     let blockchains: HashMap<String, String> =
         [("binance", "bsc")].into_iter().map(|(a, b)| (s(a), s(b))).collect();
     let block = lookup(&blockchains);
@@ -179,6 +190,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use book::utils::now;
 
 
     #[test]
@@ -216,6 +228,30 @@ mod unit_tests {
     #[test]
     fn test_swap_amount_when_token_balance_is_zero_moves_half_of_undead() {
         assert!((compute_swap_amount(2.42, 0.0) - 1.21).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_runoff_continuation_refuses_slippage_above_ceiling() {
+        // Refused before any wallet/quote/keystore work happens, so this is
+        // safe to run with no network access and garbage wallet/keystore args.
+        let result = now(runoff_continuation(
+            "avalanche", "BTC", "0xnotawallet", "", MAX_SLIPPAGE_BPS + 1, true, false,
+        ));
+        assert!(result.is_err(), "expected slippage above the ceiling to be refused");
+        assert!(result.unwrap_err().contains("ceiling"));
+    }
+
+    #[test]
+    fn test_runoff_continuation_allows_slippage_at_ceiling_to_reach_real_work() {
+        // At exactly MAX_SLIPPAGE_BPS the guard must NOT fire -- confirmed by
+        // observing execution proceed past it: it still fails, but on the
+        // local token-file lookup for a bogus blockchain name (a plain
+        // file-not-found, no network involved), not on the slippage check.
+        let result = now(runoff_continuation(
+            "not-a-real-chain", "BTC", "0xnotawallet", "", MAX_SLIPPAGE_BPS, true, false,
+        ));
+        assert!(result.is_err());
+        assert!(!result.unwrap_err().contains("ceiling"));
     }
 }
 //============================================================================================
