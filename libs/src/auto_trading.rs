@@ -600,10 +600,7 @@ fn gas_cost_avax(gas_used: Option<U256>, effective_gas_price: Option<U256>) -> f
     }
 }
 
-pub async fn load_signer(expected_address: &str, keystore_path_var: &str) -> ErrStr<LocalWallet> {
-    let keystore_path = std::env::var(keystore_path_var).map_err(|_| {
-        format!("Missing required env var: {keystore_path_var} (full path to the encrypted keystore file). No funds moved.")
-    })?;
+pub async fn load_signer(expected_address: &str, keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
         Ok(pw) => pw,
         Err(_) => rpassword::prompt_password("Keystore password: ")
@@ -789,17 +786,18 @@ pub async fn send_swap_tx(
     }
 }
 
-/// Sends `amount` of `symbol` from the wallet straight to `to_address` —
+/// Shared transfer core for both `send_tokens` and `send_tokens_to_address` —
 /// a plain ERC-20 transfer(), not a swap. Same safety baseline as
 /// execute_trade: verified signer, EIP-1559 fee buffering, hard error on
 /// revert/drop/failure rather than a false success. Does not support
 /// native AVAX (no tokens.toml address to encode against) — only ERC-20s
-/// with a real contract address.
-pub async fn send_tokens(
+/// with a real contract address. `to_address` is a literal address here;
+/// the two public wrappers below differ only in how they obtain it.
+async fn send_tokens_raw(
     wallet_address: &str,
     registry: &TokenRegistry,
     symbol: &str,
-    to_address_var: &str,
+    to_address: &str,
     amount: f64,
     keystore_path_var: &str,
     verbose: bool,
@@ -819,11 +817,10 @@ pub async fn send_tokens(
     })?;
     let amount_base = (amount * 10f64.powi(entry.decimals as i32)).round() as u128;
 
-    let to_address = get_env(to_address_var)?;
     // transfer(address,uint256) selector = 0xa9059cbb
     let data_hex = format!(
         "0xa9059cbb{}{}",
-        pad_address_for_call(&to_address),
+        pad_address_for_call(to_address),
         pad_u256_for_call(amount_base)
     );
     let to = Address::from_str(token_addr).map_err(|e| format!("Bad token address: {e}"))?;
@@ -831,7 +828,7 @@ pub async fn send_tokens(
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
 
     if !verbose {
-        println!("    On its way to the vault — courier's en route...");
+        println!("    On its way — courier's en route...");
     }
 
     let pending = client
@@ -856,6 +853,55 @@ pub async fn send_tokens(
         Some(_) => Err(format!("Transfer transaction REVERTED on-chain. Hash: {tx_hash}")),
         None => Err(format!("Transfer transaction was dropped or replaced. Hash: {tx_hash}")),
     }
+}
+
+/// Sends `amount` of `symbol` from the wallet to whatever address is held
+/// in the env var named by `to_address_var` — tvá's original Vault-payout
+/// shape. Unchanged signature/behavior from before the `sendan` refactor.
+pub async fn send_tokens(
+    wallet_address: &str,
+    registry: &TokenRegistry,
+    symbol: &str,
+    to_address_var: &str,
+    amount: f64,
+    keystore_path_var: &str,
+    verbose: bool,
+) -> ErrStr<(String, f64)> {
+    let to_address = get_env(to_address_var)?;
+    send_tokens_raw(
+        wallet_address,
+        registry,
+        symbol,
+        &to_address,
+        amount,
+        keystore_path_var,
+        verbose,
+    )
+    .await
+}
+
+/// Sends `amount` of `symbol` from the wallet straight to a literal
+/// `to_address` — no env var indirection. Used by `sendan`, where the
+/// destination is a CLI argument, not a fixed secret-backed address.
+pub async fn send_tokens_to_address(
+    wallet_address: &str,
+    registry: &TokenRegistry,
+    symbol: &str,
+    to_address: &str,
+    amount: f64,
+    keystore_path_var: &str,
+    verbose: bool,
+) -> ErrStr<(String, f64)> {
+    send_tokens_raw(
+        wallet_address,
+        registry,
+        symbol,
+        to_address,
+        amount,
+        keystore_path_var,
+        verbose,
+    )
+    .await
 }
 
 //============================================================================
