@@ -49,19 +49,27 @@ fn is_valid_evm_address(address: &str) -> bool {
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.0.0")]
+#[command(name = "sendan", version = "1.0.1")]
 struct Args {
+    /// Blockchain to send on; must match a `data/<blockchain>.toml` file. e.g. `avalanche`
     blockchain: String,
+    /// Amount of `token` to send, in human units (not wei/base units). e.g. `1100`
     amount: f64,
+    /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
     token: UppercaseString,
+    /// Destination address: `0x` followed by 40 hex characters. e.g. `0x1234567890abcdef1234567890abcdef12345678`
     to_address: String,
+    /// Wallet address to send from. e.g. `0xabc0000000000000000000000000000000000123`
     #[arg(long, env = "WALLET_ADDRESS")]
     wallet_address: String,
+    /// Path to the encrypted keystore file used to sign the transaction. e.g. `/home/user/.keystore/wallet.json`
     #[arg(long, env = "KEYSTORE_PATH")]
     keystore_path: String,
+    /// Simulate the send without broadcasting a transaction. e.g. `--dry-run`
     #[arg(long, default_value_t = false)]
     dry_run: bool,
-    #[arg(long, default_value_t = false)]
+    /// Print verbose debug logging. e.g. `-d` or `--debug`
+    #[arg(short = 'd', long, default_value_t = true)]
     debug: bool
 }
 
