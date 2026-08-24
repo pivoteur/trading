@@ -600,10 +600,7 @@ fn gas_cost_avax(gas_used: Option<U256>, effective_gas_price: Option<U256>) -> f
     }
 }
 
-pub async fn load_signer(expected_address: &str, keystore_path_var: &str) -> ErrStr<LocalWallet> {
-    let keystore_path = std::env::var(keystore_path_var).map_err(|_| {
-        format!("Missing required env var: {keystore_path_var} (full path to the encrypted keystore file). No funds moved.")
-    })?;
+pub async fn load_signer(expected_address: &str, keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
         Ok(pw) => pw,
         Err(_) => rpassword::prompt_password("Keystore password: ")

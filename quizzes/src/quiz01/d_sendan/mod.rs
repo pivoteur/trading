@@ -26,7 +26,6 @@ const DUST_EPSILON: f64 = 1e-8;
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/sendan-sends.log");
 const TRADE_LOG_HEADER: &str = "timestamp\tmode\tblockchain\ttoken\tamount\tto_address\toutcome\tactual_sent\tgas_avax\ttx_hash";
-const KEYSTORE_PATH_VAR: &str = "SENDAN_KEYSTORE_PATH";
 
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
@@ -50,20 +49,20 @@ fn is_valid_evm_address(address: &str) -> bool {
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "0.1.0")]
+#[command(name = "sendan", version = "1.0.0")]
 struct Args {
     blockchain: String,
     amount: f64,
     token: UppercaseString,
     to_address: String,
-    #[arg(long, env = "VAULT_ADDRESS")]
+    #[arg(long, env = "WALLET_ADDRESS")]
     wallet_address: String,
-    #[arg(long, env = "VAULT_KEYSTORE_PATH")]
+    #[arg(long, env = "KEYSTORE_PATH")]
     keystore_path: String,
     #[arg(long, default_value_t = false)]
     dry_run: bool,
     #[arg(long, default_value_t = false)]
-    debug: bool,
+    debug: bool
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -127,10 +126,8 @@ async fn sendan_continuation(
         return Ok(());
     }
 
-    unsafe { std::env::set_var(KEYSTORE_PATH_VAR, keystore_path); }
-
     match send_tokens_to_address(
-        wallet_address, &registry, token, to_address, amount, KEYSTORE_PATH_VAR, debug,
+        wallet_address, &registry, token, to_address, amount, keystore_path, debug,
     ).await {
         Ok((tx_hash, gas_avax)) => {
             println!("  SENT  {amount:.8} {token} -> {to_address}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
