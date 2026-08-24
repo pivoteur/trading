@@ -14,13 +14,19 @@ use book::{
 };
 use clap::Parser;
 
+
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
 }
-
+fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
+    move |k| h.get(k).cloned().unwrap_or_else(|| k.to_string())
+}
+//=========================================================================================
+// ----- CLI --------------------------------------------------------------------------------
+//=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "0.1.0")]
+#[command(version = "0.1.1")]
 struct Args {
     blockchain: String,
     from_token: UppercaseString,
@@ -34,10 +40,6 @@ struct Args {
     dry_run: bool,
     #[arg(short, long)]
     debug: bool,
-}
-
-fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
-    move |k| h.get(k).cloned().unwrap_or_else(|| k.to_string())
 }
 
 async fn runoff_continuation(blockchain: &str, from_token: &str, to_token: &str, amount: f64, floor: Option<f64>, dry_run: bool, debug: bool) -> ErrStr<()> {
@@ -66,8 +68,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 // =======================================================================
 // ----- FUNCTIONAL TESTS --------------------------------------------------
 // =======================================================================
-#[cfg(test)]
 #[cfg(not(tarpaulin_include))]
+#[cfg(test)]
 pub mod functional_test {
     use super::*;
     use paste::paste;

@@ -7,9 +7,9 @@ available.
 
 ## Usage
 
-`$ tva [--dry-run] [--debug]`
+`$ tva [--dry-run] [--debug] [--blockchain <chain>]`
 
-`$ tva [--dry-run] [--debug] div [--pct <PERCENT>]`
+`$ tva [--dry-run] [--debug] [--blockchain <chain>] div [--pct <PERCENT>]`
 
 where:
 
@@ -20,14 +20,17 @@ where:
 * `[--debug]` prints the full per-cycle breakdown — wallet status, totals,
   vs starting capital, split preview. Without it, only the actual trade
   events (opened/closed/failed) and one summary line are shown.
+* `[--blockchain <chain>]` selects which chain's token registry to load,
+  from `data/<chain>.toml` — defaults to `avalanche` (tvá's only chain to
+  date), so it can be omitted entirely for existing usage.
 * `div [--pct <PERCENT>]` runs the cycle, then sends `--pct` of the
   sendable surplus above starting capital to Vault. Default `25.0`; accepts
   any value `0`–`100`. The remainder ("trim") simply stays in `tva`'s own
   wallet — there's no separate transfer for it.
 
-> n.b: `--dry-run` and `--debug` belong to the top-level command, not to
-> `div` — put them *before* `div` on the command line
-> (`tva --dry-run --debug div --pct 5`, not the other way around).
+> n.b: `--dry-run`, `--debug`, and `--blockchain` all belong to the
+> top-level command, not to `div` — put them *before* `div` on the command
+> line (`tva --dry-run --debug div --pct 5`, not the other way around).
 
 > n.b: `TVA_WALLET_ADDRESS` and `TVA_KEYSTORE_PATH` must be set as
 > environmental variables — distinct names from `arbitrage`'s
@@ -51,8 +54,23 @@ Unix timestamp; to read one:
 
 converts it to your system's local time.
 
+A failed real (non-dry-run) trade attempt writes a `MISFIRE` row instead
+of an `OPEN`/`CLOSE` — same replay, but a `MISFIRE` is never mistaken for
+a real pivot open or close, it only folds into the running gas/gain
+totals. `--dry-run` still writes zero log entries, MISFIRE included.
+
 ## Revisions
 
+* 1.2.0, 2026-08-19: real (non-dry-run) trade failures now write a
+`MISFIRE` row to `tva-trades.log` via a new `log_misfire` helper in
+`trading::auto_trading` (shared with `arbitrage`), instead of console-only
+output that vanished once the run ended. Dry-run still writes zero log
+entries.
+* 1.1.0, 2026-08-19: `tokens.toml` is no longer a compile-time
+`include_str!` constant — it's now loaded at runtime from
+`data/<blockchain>.toml` via a new `--blockchain` flag (defaults to
+`avalanche`, so existing invocations and the `tva.yml` workflow keep
+working unchanged).
 * 0.24.0, 2026-08-15: after all tests pased - beta-reduction of two duplicate
 functions doing the same thing.
 * 0.23.0, 2026-08-15: hot-fix to address negative gain and I also corrected

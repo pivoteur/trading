@@ -17,11 +17,12 @@ use clap::Parser;
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
 }
-
-
+//=========================================================================================
+// ----- CLI --------------------------------------------------------------------------------
+//=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.0.4")]
+#[command(version = "1.0.5")]
 struct Args {
     from_token: UppercaseString,
     amount: f64,
@@ -60,14 +61,47 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 //=========================================================================
 // ----- UNIT TESTS ---------------------------------------------------------
 //=========================================================================
-// would dry_run clear
-// would dry_run fail
+#[cfg(not(tarpaulin_include))]
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use trading::auto_trading::AttemptOutcome;
+
+
+    const DUMMY_WALLET: &str = "0x0000000000000000000000000000000000dEaD";
+    const DUMMY_KEYSTORE_VAR: &str = "UNUSED_KEYSTORE_PATH_VAR";
+
+    #[tokio::test]
+    async fn dry_run_would_clear() -> ErrStr<()> {
+        let tokens = read_file("data/avalanche.toml")?;
+        let registry = load_token_registry(&tokens)?;
+        // floor 0.0, same as runoff_continuation's real call -- any live quote clears it.
+        let ans = attempt_trade_with_actual_amount(
+            "avalanche", DUMMY_WALLET, &registry, "BTC", "USDC", 1.0, 0.0, 1000, DUMMY_KEYSTORE_VAR, true, false,
+        ).await?;
+        assert!(matches!(ans, DryRunWouldClear { .. }), "expected DryRunWouldClear, got {ans:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dry_run_would_fail() -> ErrStr<()> {
+        let tokens = read_file("data/avalanche.toml")?;
+        let registry = load_token_registry(&tokens)?;
+        // A floor no live quote could ever clear -- deterministically forces
+        // NotCleared regardless of where the market is right now.
+        let ans = attempt_trade_with_actual_amount(
+            "avalanche", DUMMY_WALLET, &registry, "BTC", "USDC", 1.0, 1e30, 1000, DUMMY_KEYSTORE_VAR, true, false,
+        ).await?;
+        assert!(matches!(ans, AttemptOutcome::NotCleared), "expected NotCleared, got {ans:?}");
+        Ok(())
+    }
+}
 
 //=========================================================================
 // ----- FUNCTIONAL TESTS --------------------------------------------------
 //=========================================================================
-#[cfg(test)]
 #[cfg(not(tarpaulin_include))]
+#[cfg(test)]
 pub mod functional_test { 
     use super::*;
     use paste::paste;
