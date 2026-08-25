@@ -201,7 +201,7 @@ pub async fn kyber_swap(
         .await
         .map_err(|e| format!("KyberSwap route request failed: {e}"))?;
 
-        log!("kyber call completed with {:?}", resp);
+        log!("kyber call completed: HTTP {}", resp.status());
     let status = resp.status();
     let raw_body = resp
         .text()
