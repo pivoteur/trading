@@ -43,9 +43,6 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 // tvá trades exactly one pair, BTC<->UNDEAD (unlike arbitrage, which
 // surveys many pools). Named as a constant to match UNDEAD below.
 const BTC: &str = "BTC";
-/// Env var name for tvá's encrypted keystore file path.
-const KEYSTORE_PATH_VAR: &str = "TVA_KEYSTORE_PATH";
-
 const UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const BTC_TRADE_AMOUNT: f64 = 0.005;
 const SLIPPAGE_BPS: u16 = 30;
@@ -76,7 +73,7 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, I
 //============================================================================
 //----- One Trading Cycle -------------------------------------------------------
 //============================================================================
-pub async fn run_cycle(blockchain: &str, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+pub async fn run_cycle(keystore_path: &str, blockchain: &str, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let wallet_address = wallet_address_from_env("TVA_WALLET_ADDRESS")?;
     let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
     let registry = load_token_registry(&tokens)?; //calling this when calling div
@@ -104,7 +101,7 @@ pub async fn run_cycle(blockchain: &str, pct: f64, dry_run: bool, debug: bool) -
         eprintln!("surveying {} open pivot(s) this cycle", open_pivots.len());
     }
     for pivot in open_pivots {
-        pivot_survey(blockchain, dry_run, debug, &wallet_address, &registry, &mut next_close_id, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut closed_something, pivot, pct).await;
+        pivot_survey(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_close_id, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut closed_something, pivot, pct).await;
     }
 
     if !closed_something {
@@ -125,10 +122,10 @@ pub async fn run_cycle(blockchain: &str, pct: f64, dry_run: bool, debug: bool) -
     let mut skipped_open_reasons: Vec<String> = Vec::new();
 
     let btc_available = snap.asset_available;
-    open_trade(blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, BTC, UNDEAD, BTC_TRADE_AMOUNT, btc_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
+    open_trade(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, BTC, UNDEAD, BTC_TRADE_AMOUNT, btc_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
 
     let undead_available = snap.undead_available;
-    open_trade(blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, undead_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
+    open_trade(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, undead_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
 
     assesment_report(opened_something, running_stats, &skipped_open_reasons);
 
@@ -169,7 +166,7 @@ fn amount_decimals(token: &str) -> usize {
 /// inside this function, so one bad leg can't cancel the other leg or
 /// the cycle's summary report.
 #[allow(clippy::too_many_arguments)]
-async fn open_trade(blockchain: &str, dry_run: bool, debug: bool, wallet_address: &str, registry: &TokenRegistry, next_pivot_id: &mut Id, from: &str, to: &str, amount: f64, available: f64, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) {
+async fn open_trade(keystore_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &str, registry: &TokenRegistry, next_pivot_id: &mut Id, from: &str, to: &str, amount: f64, available: f64, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) {
     if available <= amount {
         let decimals = amount_decimals(from);
         skipped_open_reasons.push(format!("{from} free balance {available:.decimals$} <= {amount}"));
@@ -180,7 +177,7 @@ async fn open_trade(blockchain: &str, dry_run: bool, debug: bool, wallet_address
     let from_dp = amount_decimals(from);
     let to_dp = amount_decimals(to);
     match attempt_trade_with_actual_amount(
-       blockchain, wallet_address, registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
+       blockchain, wallet_address, registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, keystore_path, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  OPENED  #{pivot_id:<4} {amount:.from_dp$} {from} -> {actual_received:.to_dp$} {to}   gas {gas_avax:.5} AVAX");
@@ -217,7 +214,7 @@ async fn open_trade(blockchain: &str, dry_run: bool, debug: bool, wallet_address
 /// same as `open_trade` -- one bad pivot can't cancel the rest of the
 /// survey or the open-new-position step that follows it.
 #[allow(clippy::too_many_arguments)]
-async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
+async fn pivot_survey(keystore_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
     // Decimals to display each side of this pivot with -- prim is the
     // token being closed back into, proper is the token currently held.
     // Matches amount_decimals() usage everywhere else in this file, so a
@@ -228,7 +225,7 @@ async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_addre
 
     match attempt_trade_with_actual_amount(
         blockchain, wallet_address, registry, &pivot.proper, &pivot.prim,
-        pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
+        pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS, keystore_path, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             if dry_run { panic!("dry run should never return Executed — that would mean funds were actually moved!"); }
@@ -276,7 +273,7 @@ async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_addre
 
             // The Vault div is secondary to an already-logged close --
             // its failure must not hide that the close happened.
-            if let Err(e) = divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, false, debug).await {
+            if let Err(e) = divvy_to_vault(keystore_path, wallet_address, registry, &pivot.prim, gain, pct, false, debug).await {
                 println!("  ! pivot #{} closed and logged, but sending the div to Vault failed: {e} -- needs a manual look.", pivot.pivot_id);
             }
         }
@@ -289,7 +286,7 @@ async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_addre
                 pivot.pivot_id, pivot.prim_amount, pivot.prim, pivot.proper_amount, pivot.proper,
                 quoted_amount_out, pivot.prim, roi * 100.0
             );
-            if let Err(e) = divvy_to_vault(wallet_address, registry, &pivot.prim, gain, pct, true, debug).await {
+            if let Err(e) = divvy_to_vault(keystore_path, wallet_address, registry, &pivot.prim, gain, pct, true, debug).await {
                 println!("  ! pivot #{} dry-run div preview failed: {e}", pivot.pivot_id);
             }
             *closed_something = true;
@@ -323,7 +320,7 @@ async fn pivot_survey(blockchain: &str, dry_run: bool, debug: bool, wallet_addre
 //============================================================================
 fn compute_div_amount(pct: f64, gain: f64) -> f64 { pct / 100.0 * gain }
 
-async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &str, gain: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+async fn divvy_to_vault(keystore_path: &str, wallet_address: &str, registry: &TokenRegistry, token: &str, gain: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
     let amount = compute_div_amount(pct, gain);
 
@@ -338,7 +335,7 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
             println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault.");
         }
         else {
-            let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, KEYSTORE_PATH_VAR, debug).await?;
+            let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, keystore_path, debug).await?;
             println!("  Sent {amount:.8} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
         }
     }
@@ -350,12 +347,14 @@ async fn divvy_to_vault(wallet_address: &str, registry: &TokenRegistry, token: &
 //============================================================================
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.3.1")]
+#[command(version = "1.4.2")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     /// `global = true` lets this be given either before or after the
     /// subcommand — `tva --dry-run div` and `tva div --dry-run` both work.
+    #[arg(long, env = "TVA_KEYSTORE_PATH")]
+    keystore_path: String,
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
     /// debug mode (e.g. --debug or -d)
@@ -383,7 +382,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
         }
         Some(Command::Div { pct }) => { pct }
     };
-        run_cycle(&args.blockchain, pct, args.dry_run, args.debug).await
+        run_cycle(&args.keystore_path, &args.blockchain, pct, args.dry_run, args.debug).await
 }
 
 //============================================================================
@@ -442,13 +441,13 @@ mod unit_tests {
 pub mod functional_tests {
     use super::*;
     use paste::paste;
-    use book::{ create_testing, utils::now };
+    use book::{ create_testing, utils::{ get_env, now } };
     use trading::auto_trading::{ wallet_balance, kyber_swap };
 
 
     create_testing!("quiz01::a_tva");
 
-    run!("wallet_balance_btc", " (real BTC.b read against dedicated test wallet, read-only)", {
+    run!("wallet_balance_btc", {
         let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
         let registry = load_token_registry(&tokens)?;
         let balance = now(wallet_balance(
@@ -459,7 +458,7 @@ pub mod functional_tests {
         println!("\ttest wallet BTC balance: {balance:.8}");
     });
 
-    run!("wallet_balance_undead", " (real UNDEAD read against dedicated test wallet, read-only)", {
+    run!("wallet_balance_undead", {
         let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
         let registry = load_token_registry(&tokens)?;
         let balance = now(wallet_balance(
@@ -470,22 +469,23 @@ pub mod functional_tests {
         println!("\ttest wallet UNDEAD balance: {balance:.2}");
     });
 
-    run!("live_quote_undead_to_btc", " (real KyberSwap route, read-only, 500000 UNDEAD -> BTC)", {
+    run!("live_quote_undead_to_btc", {
         let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
         let registry = load_token_registry(&tokens)?;
         let swap = now(kyber_swap("avalanche", &registry, "UNDEAD", "BTC", 500_000.0, true))?;
         println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
-    run!("live_quote_btc_to_undead", " (real KyberSwap route, read-only, 0.005 BTC -> UNDEAD)", {
+    run!("live_quote_btc_to_undead", {
         let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
         let registry = load_token_registry(&tokens)?;
         let swap = now(kyber_swap("avalanche", &registry, "BTC", "UNDEAD", 0.005, true))?;
         println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
-    run!("cycle_dry_run", " (real balances + quotes, never touches keystore)", {
-        now(run_cycle("avalanche", 25.0, true, false))?;
+    run!("cycle_dry_run", {
+        let keystore_path = get_env("TVA_KEYSTORE_PATH")?;
+        now(run_cycle(&keystore_path, "avalanche", 25.0, true, false))?;
         println!("\tdry-run cycle completed without touching the keystore");
     });
 }

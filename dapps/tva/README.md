@@ -61,6 +61,7 @@ totals. `--dry-run` still writes zero log entries, MISFIRE included.
 
 ## Revisions
 
+* 1.4.2, 2026-08-25: removed the keystore_path_var being passed in
 * 1.3.1, 2026-08-24: consistent decimals and slippage adjustment
 * 1.3.0 , 2026-08-24: `tva` had some cases were the pivots that can be closed 
 were not being closed. That is hopfully addressed now. And, revision on the 
