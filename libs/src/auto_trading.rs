@@ -607,7 +607,7 @@ pub async fn load_signer(expected_address: &str, keystore_path: &str) -> ErrStr<
             .map_err(|e| format!("Could not read password: {e}. No funds moved."))?,
     };
     let wallet = LocalWallet::decrypt_keystore(&keystore_path, &password)
-        .map_err(|e| format!("Could not decrypt keystore: {e}. No funds moved."))?
+        .map_err(|e| format!("Could not decrypt keystore, path {keystore_path}: {e}. No funds moved."))?
         .with_chain_id(AVALANCHE_CHAIN_ID);
     let derived = format!("{:?}", wallet.address());
     if !derived.eq_ignore_ascii_case(expected_address) {
