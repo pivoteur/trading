@@ -101,7 +101,7 @@ jobs:
             ARGS="$ARGS --debug"
           fi
           echo "=== Running maegen on avalanche with BTC --wallet-address **** --keystore-path **** $ARGS ==="
-          $DAPP avalanche BTC --wallet-address "$VAULT_ADDRESS" --keystore-path "$VAULT_KEYSTORE_PATH" $ARGS
+          $DAPP avalanche BTC $ARGS
 
       - name: Commit trade log to trading
         if: ${{ github.event.inputs.dry_run != 'true' }}
