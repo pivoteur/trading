@@ -56,6 +56,7 @@ pub fn token_entry<'a>(registry: &'a TokenRegistry, symbol: &str) -> ErrStr<&'a 
 //============================================================================
 pub const UNDEAD: &str = "UNDEAD";
 pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
+pub const LOG_TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 //============================================================================
 //----- Shared HTTP Client ----------------------------------------------------
 //============================================================================
@@ -321,11 +322,16 @@ pub fn biggest_first(mut pivots: Vec<OpenPivot>) -> Vec<OpenPivot> {
     pivots
 }
 
+/// Sums `proper_amount` across every still-open pivot holding `token` --
+/// how much of `token` is currently tied up in open pivots, not
+/// available to trade or withdraw.
+pub fn committed_amount(token: &str, open_pivots: &[OpenPivot]) -> f64 {
+    open_pivots.iter().filter(|p| p.proper == token).map(|p| p.proper_amount).sum()
+}
+
 pub fn now_ts() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
-
-pub const LOG_TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 pub fn log_ts(epoch: u64) -> String {
     DateTime::<Utc>::from_timestamp(epoch as i64, 0)
