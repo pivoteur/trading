@@ -94,6 +94,8 @@ created, so it's always there to copy straight into Google Sheets.
 
 ## Revisions
 
+* 0.17.0, 2026-08-25: `arbitrage` function changed entirely. Now, this 
+program is a go-or-no-go on all of call.csv.
 * 0.12.0, 2026-08-07: major rework — `arbitrage` now manages any number
 of `TOKEN <-> UNDEAD` pivot pools (`new` to bootstrap one, no subcommand
 to survey and close across all of them), each with its own per-pool TSV
