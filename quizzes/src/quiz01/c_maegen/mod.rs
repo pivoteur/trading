@@ -53,7 +53,7 @@ struct Args {
     keystore_path: String,
     #[arg(long, default_value_t = false)]
     dry_run: bool,
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'd', long, default_value_t = false)]
     debug: bool,
     #[arg(long, default_value_t = DEFAULT_SLIPPAGE_BPS)]
     slippage_bps: u16,    
