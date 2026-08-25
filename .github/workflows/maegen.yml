@@ -89,7 +89,7 @@ jobs:
 
       - name: Write keystore file from secret
         env:
-          VAULT_KEYSTORE_JSON: ${{ secrets.VAULT_KEYSTORE_PATH }}
+          VAULT_KEYSTORE_JSON: ${{ secrets.VAULT_KEYSTORE_JSON }}
         run: |
           echo "$VAULT_KEYSTORE_JSON" > "$RUNNER_TEMP/vault-keystore.json"
           echo "VAULT_KEYSTORE_PATH=$RUNNER_TEMP/vault-keystore.json" >> $GITHUB_ENV
@@ -107,7 +107,7 @@ jobs:
             ARGS="$ARGS --debug"
           fi
           echo "=== Running maegen on avalanche with BTC --wallet-address **** --keystore-path **** $ARGS ==="
-          $DAPP --keystore-path "$VAULT_KEYSTORE_PATH" avalanche BTC $ARGS
+          $DAPP avalanche BTC --wallet-address "$VAULT_ADDRESS" --keystore-path "$VAULT_KEYSTORE_PATH" $ARGS
 
       - name: Delete keystore file
         if: always()
