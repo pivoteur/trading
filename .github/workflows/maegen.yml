@@ -107,7 +107,11 @@ jobs:
             ARGS="$ARGS --debug"
           fi
           echo "=== Running maegen on avalanche with BTC --wallet-address **** --keystore-path **** $ARGS ==="
-          $DAPP avalanche BTC $ARGS
+          $DAPP --keystore-path "$VAULT_KEYSTORE_PATH" avalanche BTC $ARGS
+
+      - name: Delete keystore file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vault-keystore.json"
 
       - name: Commit trade log to trading
         if: ${{ github.event.inputs.dry_run != 'true' }}
