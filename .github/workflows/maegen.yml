@@ -87,10 +87,16 @@ jobs:
       - name: Add maegen to PATH
         run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
 
+      - name: Write keystore file from secret
+        env:
+          VAULT_KEYSTORE_JSON: ${{ secrets.VAULT_KEYSTORE_PATH }}
+        run: |
+          echo "$VAULT_KEYSTORE_JSON" > "$RUNNER_TEMP/vault-keystore.json"
+          echo "VAULT_KEYSTORE_PATH=$RUNNER_TEMP/vault-keystore.json" >> $GITHUB_ENV
+
       - name: Run maegen
         env:
           VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
-          VAULT_KEYSTORE_PATH: ${{ secrets.VAULT_KEYSTORE_PATH }}
           KEYSTORE_PASSWORD:   ${{ secrets.VAULT_KEYSTORE_PASSWORD }}
         run: |
           ARGS=""
