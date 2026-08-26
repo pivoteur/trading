@@ -49,4 +49,6 @@ Verify all dependencies are set by running these commands:
  * `cast wallet address --account <name>` to confirm your wallet's address. This is the first secret for GitHub.
  * `cat ~/.foundry/keystores/<name>` to confirm and produce the JSON blob you need as one of the secrets. This the second secret for GitHub.
  * The "_Enter keystore password_" you set is the third secret for GitHub.
-
+## Step IV
+ * Add these three dependencies to your GitHub's repository secrets.
+ * export the `wallet address` and the `~/.foundry/keystores/<name>` path, locally within `~/.bashrc`
