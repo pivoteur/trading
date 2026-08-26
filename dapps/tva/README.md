@@ -7,12 +7,15 @@ available.
 
 ## Usage
 
-`$ tva [--dry-run] [--debug] [--blockchain <chain>]`
+`$ tva --log-path <path> [--dry-run] [--debug] [--blockchain <chain>]`
 
-`$ tva [--dry-run] [--debug] [--blockchain <chain>] div [--pct <PERCENT>]`
+`$ tva --log-path <path> [--dry-run] [--debug] [--blockchain <chain>] div [--pct <PERCENT>]`
 
 where:
 
+* `--log-path <path>` (or `TVA_LOG_PATH`) is the trade log this instance
+  reads its history from and appends to. Required, no default — see the
+  env var note below for why.
 * `[--dry-run]` checks only — never touches the keystore or sends a tx, no
   log entries written for opens or closes. Applies to `div` too: the cycle
   it runs first moves no funds, and the vault transfer itself becomes a
@@ -61,6 +64,11 @@ totals. `--dry-run` still writes zero log entries, MISFIRE included.
 
 ## Revisions
 
+* 1.5.0, 2026-08-26: trade log path is no longer a compile-time constant —
+it's now a required `--log-path` / `TVA_LOG_PATH` argument, no default.
+Lets a binary built once and moved to `$HOME/bin` log to the right place
+in prod, and lets multiple `tva` instances use separate log files.
+Breaking change: set `TVA_LOG_PATH` before running this version.
 * 1.4.2, 2026-08-25: removed the keystore_path_var being passed in
 * 1.3.1, 2026-08-24: consistent decimals and slippage adjustment
 * 1.3.0 , 2026-08-24: `tva` had some cases were the pivots that can be closed 

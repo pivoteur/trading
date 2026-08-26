@@ -49,9 +49,16 @@ const SLIPPAGE_BPS: u16 = 30;
 const VAULT_ADDRESS: &str = "VAULT_ADDRESS";
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //============================================================================
-//----- Trade Log — path & human-readable timestamps ---------------------------
+//----- Trade Log — human-readable timestamps -----------------------------------
 //============================================================================
-const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/tva-trades.log");
+// NOTE: the log path is no longer a compile-time const. It used to be
+// `concat!(env!("CARGO_MANIFEST_DIR"), "/data/tva-trades.log")`, which
+// bakes in the manifest dir of whichever crate this source file happens
+// to live in at compile time (quizzes) — not wherever the built binary is
+// later run from. That "worked" only by accident during local dev/test.
+// It's now a required runtime argument (`--log-path` / `TVA_LOG_PATH`) so
+// (a) prod can point it wherever it actually belongs, and (b) more than
+// one tvá instance can run against separate log files without colliding.
 
 fn human_ts(epoch: u64) -> String {
     DateTime::<Utc>::from_timestamp(epoch as i64, 0)
@@ -73,11 +80,11 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, I
 //============================================================================
 //----- One Trading Cycle -------------------------------------------------------
 //============================================================================
-pub async fn run_cycle(keystore_path: &str, blockchain: &str, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+pub async fn run_cycle(keystore_path: &str, log_path: &str, blockchain: &str, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let wallet_address = wallet_address_from_env("TVA_WALLET_ADDRESS")?;
     let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
     let registry = load_token_registry(&tokens)?; //calling this when calling div
-    let (open_pivots0, mut next_pivot_id, mut next_close_id, opening_stats) = replay_log_with_history_required(TRADE_LOG_PATH)?;
+    let (open_pivots0, mut next_pivot_id, mut next_close_id, opening_stats) = replay_log_with_history_required(log_path)?;
     let open_pivots = biggest_first(open_pivots0);
 
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
@@ -101,7 +108,7 @@ pub async fn run_cycle(keystore_path: &str, blockchain: &str, pct: f64, dry_run:
         eprintln!("surveying {} open pivot(s) this cycle", open_pivots.len());
     }
     for pivot in open_pivots {
-        pivot_survey(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_close_id, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut closed_something, pivot, pct).await;
+        pivot_survey(keystore_path, log_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_close_id, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut closed_something, pivot, pct).await;
     }
 
     if !closed_something {
@@ -122,10 +129,10 @@ pub async fn run_cycle(keystore_path: &str, blockchain: &str, pct: f64, dry_run:
     let mut skipped_open_reasons: Vec<String> = Vec::new();
 
     let btc_available = snap.asset_available;
-    open_trade(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, BTC, UNDEAD, BTC_TRADE_AMOUNT, btc_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
+    open_trade(keystore_path, log_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, BTC, UNDEAD, BTC_TRADE_AMOUNT, btc_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
 
     let undead_available = snap.undead_available;
-    open_trade(keystore_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, undead_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
+    open_trade(keystore_path, log_path, blockchain, dry_run, debug, &wallet_address, &registry, &mut next_pivot_id, UNDEAD, BTC, UNDEAD_TRADE_AMOUNT, undead_available, &mut committed_btc, &mut committed_undead, &mut running_stats, &mut snap, &mut opened_something, &mut skipped_open_reasons).await;
 
     assesment_report(opened_something, running_stats, &skipped_open_reasons);
 
@@ -166,7 +173,7 @@ fn amount_decimals(token: &str) -> usize {
 /// inside this function, so one bad leg can't cancel the other leg or
 /// the cycle's summary report.
 #[allow(clippy::too_many_arguments)]
-async fn open_trade(keystore_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &str, registry: &TokenRegistry, next_pivot_id: &mut Id, from: &str, to: &str, amount: f64, available: f64, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) {
+async fn open_trade(keystore_path: &str, log_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &str, registry: &TokenRegistry, next_pivot_id: &mut Id, from: &str, to: &str, amount: f64, available: f64, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, snap: &mut BalanceSnapshot, opened_something: &mut bool, skipped_open_reasons: &mut Vec<String>) {
     if available <= amount {
         let decimals = amount_decimals(from);
         skipped_open_reasons.push(format!("{from} free balance {available:.decimals$} <= {amount}"));
@@ -192,7 +199,7 @@ async fn open_trade(keystore_path: &str, blockchain: &str, dry_run: bool, debug:
                 Ok(fresh) => *snap = fresh,
                 Err(e) => eprintln!("  ! WARNING: pivot #{pivot_id} opened, but the post-open balance snapshot failed ({e}). Logging the open now anyway with the last-known snapshot -- re-check wallet balances by hand."),
             }
-            log_open(TRADE_LOG_PATH, None, pivot_id, from, amount, to, actual_received, gas_avax, &tx_hash, &*snap, &*running_stats);
+            log_open(log_path, None, pivot_id, from, amount, to, actual_received, gas_avax, &tx_hash, &*snap, &*running_stats);
             *opened_something = true;
         }
         Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
@@ -203,7 +210,7 @@ async fn open_trade(keystore_path: &str, blockchain: &str, dry_run: bool, debug:
         Err(e) => {
             println!("  ! open ({from}->{to}) failed: {e}");
             if !dry_run {
-                log_misfire(TRADE_LOG_PATH, None, from, to, amount, 0.0, "", &*snap, &*running_stats);
+                log_misfire(log_path, None, from, to, amount, 0.0, "", &*snap, &*running_stats);
             }
         }
     }
@@ -214,7 +221,7 @@ async fn open_trade(keystore_path: &str, blockchain: &str, dry_run: bool, debug:
 /// same as `open_trade` -- one bad pivot can't cancel the rest of the
 /// survey or the open-new-position step that follows it.
 #[allow(clippy::too_many_arguments)]
-async fn pivot_survey(keystore_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
+async fn pivot_survey(keystore_path: &str, log_path: &str, blockchain: &str, dry_run: bool, debug: bool, wallet_address: &String, registry: &std::collections::HashMap<String, trading::auto_trading::TokenEntry>, next_close_id: &mut Id, committed_btc: &mut f64, committed_undead: &mut f64, running_stats: &mut CumulativeStats, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
     // Decimals to display each side of this pivot with -- prim is the
     // token being closed back into, proper is the token currently held.
     // Matches amount_decimals() usage everywhere else in this file, so a
@@ -267,7 +274,7 @@ async fn pivot_survey(keystore_path: &str, blockchain: &str, dry_run: bool, debu
                         undead_balance: 0.0, undead_committed: *committed_undead, undead_available: 0.0,
                     }
                 });
-            log_close(TRADE_LOG_PATH, None, pivot.pivot_id, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
+            log_close(log_path, None, pivot.pivot_id, *next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &*running_stats);
             *next_close_id += 1;
             *closed_something = true;
 
@@ -309,7 +316,7 @@ async fn pivot_survey(keystore_path: &str, blockchain: &str, dry_run: bool, debu
                             undead_balance: 0.0, undead_committed: *committed_undead, undead_available: 0.0,
                         }
                     });
-                log_misfire(TRADE_LOG_PATH, None, &pivot.prim, &pivot.proper, pivot.prim_amount, 0.0, "", &snap, &*running_stats);
+                log_misfire(log_path, None, &pivot.prim, &pivot.proper, pivot.prim_amount, 0.0, "", &snap, &*running_stats);
             }
         }
     }
@@ -347,7 +354,7 @@ async fn divvy_to_vault(keystore_path: &str, wallet_address: &str, registry: &To
 //============================================================================
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.4.2")]
+#[command(version = "1.5.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -355,6 +362,12 @@ struct Args {
     /// subcommand — `tva --dry-run div` and `tva div --dry-run` both work.
     #[arg(long, env = "TVA_KEYSTORE_PATH")]
     keystore_path: String,
+    /// Path to THIS instance's trade log. No default on purpose: a
+    /// default here is exactly how two tvá instances (different wallet,
+    /// different pair) end up silently sharing -- and corrupting -- one
+    /// log file. Every deployment must set this explicitly.
+    #[arg(long, env = "TVA_LOG_PATH")]
+    log_path: String,
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
     /// debug mode (e.g. --debug or -d)
@@ -382,7 +395,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
         }
         Some(Command::Div { pct }) => { pct }
     };
-        run_cycle(&args.keystore_path, &args.blockchain, pct, args.dry_run, args.debug).await
+        run_cycle(&args.keystore_path, &args.log_path, &args.blockchain, pct, args.dry_run, args.debug).await
 }
 
 //============================================================================
@@ -441,7 +454,7 @@ mod unit_tests {
 pub mod functional_tests {
     use super::*;
     use paste::paste;
-    use book::{ create_testing, utils::{ get_env, now } };
+    use book::{ create_testing, utils::now };
     use trading::auto_trading::{ wallet_balance, kyber_swap };
 
 
@@ -484,8 +497,14 @@ pub mod functional_tests {
     });
 
     run!("cycle_dry_run", {
-        let keystore_path = get_env("TVA_KEYSTORE_PATH")?;
-        now(run_cycle(&keystore_path, "avalanche", 25.0, true, false))?;
+        let log_path = std::env::temp_dir().join("tva_functional_test_cycle_dry_run.log");
+        let log_path_str = log_path.to_str().unwrap();
+        std::fs::write(
+            &log_path,
+            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
+        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+        now(run_cycle("unused-in-dry-run", log_path_str, "avalanche", 25.0, true, false))?;
         println!("\tdry-run cycle completed without touching the keystore");
+        let _ = std::fs::remove_file(&log_path);
     });
 }
