@@ -10,7 +10,6 @@ use book::{
         err_utils::ErrStr,
         file_utils::lines_from_file,
         string_utils::s,
-        utils::get_env
 };
 use ethers::{
         middleware::SignerMiddleware,
@@ -77,6 +76,16 @@ pub fn wallet_address_from_env(var_name: &str) -> ErrStr<String> {
         let ans = format!("Missing required env var: {var_name} (your public wallet address)");
         ans
     })
+}
+
+/// Resolves a wallet address at the CLI boundary: `cli_value` wins if given,
+/// otherwise falls back to `wallet_address_from_env(env_var)`. Call this from
+/// your binary's CLI entrypoint only, never from inside a cycle-running fn.
+pub fn resolve_wallet_address(cli_value: Option<String>, env_var: &str) -> ErrStr<String> {
+    match cli_value {
+        Some(addr) => Ok(addr),
+        None => wallet_address_from_env(env_var),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -538,7 +547,7 @@ pub async fn attempt_trade_with_actual_amount(
     amount: f64,
     min_floor: f64,
     slippage_bps: u16,
-    keystore_path_var: &str,
+    keystore_path: &str,
     dry_run: bool,
     debug: bool,
 ) -> ErrStr<AttemptOutcome> {
@@ -554,7 +563,7 @@ pub async fn attempt_trade_with_actual_amount(
             Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: swap.amount_out })
         } else {
             let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
-            let (tx_hash, gas_avax) = execute_trade(blockchain, wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path_var, debug).await?;
+            let (tx_hash, gas_avax) = execute_trade(blockchain, wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path, debug).await?;
             let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
             let actual_received = balance_after - balance_before;
                 debug_trade_result(Some(&tx_hash), "EXECUTED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
@@ -786,34 +795,34 @@ pub async fn send_swap_tx(
     }
 }
 
-/// Shared transfer core for both `send_tokens` and `send_tokens_to_address` —
-/// a plain ERC-20 transfer(), not a swap. Same safety baseline as
-/// execute_trade: verified signer, EIP-1559 fee buffering, hard error on
-/// revert/drop/failure rather than a false success. Does not support
-/// native AVAX (no tokens.toml address to encode against) — only ERC-20s
-/// with a real contract address. `to_address` is a literal address here;
-/// the two public wrappers below differ only in how they obtain it.
+/// Transfer core behind `send_tokens_to_address` — a plain ERC-20
+/// transfer(), not a swap. Same safety baseline as execute_trade: verified
+/// signer, EIP-1559 fee buffering, hard error on revert/drop/failure
+/// rather than a false success. Does not support native AVAX (no
+/// tokens.toml address to encode against) — only ERC-20s with a real
+/// contract address. `to_address` is always a literal here — nothing in
+/// this file resolves an address from env internally anymore.
 async fn send_tokens_raw(
     wallet_address: &str,
     registry: &TokenRegistry,
     symbol: &str,
     to_address: &str,
     amount: f64,
-    keystore_path_var: &str,
+    keystore_path: &str,
     verbose: bool,
 ) -> ErrStr<(String, f64)> {
     if amount <= 0.0 {
-        return Err(format!("send_tokens: amount must be positive, got {amount}"));
+        return Err(format!("send_tokens_to_address: amount must be positive, got {amount}"));
     }
 
-    let signer = load_signer(wallet_address, keystore_path_var).await?;
+    let signer = load_signer(wallet_address, keystore_path).await?;
     let provider = Provider::<Http>::try_from(AVALANCHE_RPC)
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
 
     let entry = token_entry(registry, symbol)?;
     let token_addr = entry.address.as_deref().ok_or_else(|| {
-        format!("'{symbol}' has no address in tokens.toml (or is native — send_tokens only supports ERC-20 transfers)")
+        format!("'{symbol}' has no address in tokens.toml (or is native — send_tokens_to_address only supports ERC-20 transfers)")
     })?;
     let amount_base = (amount * 10f64.powi(entry.decimals as i32)).round() as u128;
 
@@ -855,41 +864,13 @@ async fn send_tokens_raw(
     }
 }
 
-/// Sends `amount` of `symbol` from the wallet to whatever address is held
-/// in the env var named by `to_address_var` — tvá's original Vault-payout
-/// shape. Unchanged signature/behavior from before the `sendan` refactor.
-pub async fn send_tokens(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    symbol: &str,
-    to_address_var: &str,
-    amount: f64,
-    keystore_path_var: &str,
-    verbose: bool,
-) -> ErrStr<(String, f64)> {
-    let to_address = get_env(to_address_var)?;
-    send_tokens_raw(
-        wallet_address,
-        registry,
-        symbol,
-        &to_address,
-        amount,
-        keystore_path_var,
-        verbose,
-    )
-    .await
-}
-
-/// Sends `amount` of `symbol` from the wallet straight to a literal
-/// `to_address` — no env var indirection. Used by `sendan`, where the
-/// destination is a CLI argument, not a fixed secret-backed address.
 pub async fn send_tokens_to_address(
     wallet_address: &str,
     registry: &TokenRegistry,
     symbol: &str,
     to_address: &str,
     amount: f64,
-    keystore_path_var: &str,
+    keystore_path: &str,
     verbose: bool,
 ) -> ErrStr<(String, f64)> {
     send_tokens_raw(
@@ -898,7 +879,7 @@ pub async fn send_tokens_to_address(
         symbol,
         to_address,
         amount,
-        keystore_path_var,
+        keystore_path,
         verbose,
     )
     .await
@@ -1105,6 +1086,21 @@ mod unit_tests {
         assert!(result.is_err(), "a MISFIRE row must never carry a pivot_id -- that would make it indistinguishable from a real OPEN");
         let _ = std::fs::remove_file(&path);
     }
+
+    #[test]
+    fn test_resolve_wallet_address_prefers_cli_value_and_never_touches_env() {
+        let resolved = resolve_wallet_address(
+            Some("0xCLI0000000000000000000000000000000000".to_string()),
+            "DEFINITELY_NOT_A_REAL_ENV_VAR_NAME_XYZ",
+        );
+        assert_eq!(resolved.unwrap(), "0xCLI0000000000000000000000000000000000");
+    }
+
+    #[test]
+    fn test_resolve_wallet_address_errors_clearly_when_neither_is_set() {
+        let result = resolve_wallet_address(None, "DEFINITELY_NOT_A_REAL_ENV_VAR_NAME_XYZ");
+        assert!(result.is_err(), "with no CLI value and no env var set, this must be a clear error, not a silent empty address");
+    }
 }
 
 pub async fn execute_trade(
@@ -1116,10 +1112,10 @@ pub async fn execute_trade(
     amount: f64,
     min_floor: f64,
     slippage_bps: u16,
-    keystore_path_var: &str,
+    keystore_path: &str,
     verbose: bool,
 ) -> ErrStr<(String, f64)> {
-    let signer = load_signer(wallet_address, keystore_path_var).await?;
+    let signer = load_signer(wallet_address, keystore_path).await?;
     let provider = Provider::<Http>::try_from(AVALANCHE_RPC)
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);

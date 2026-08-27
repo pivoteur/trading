@@ -11,6 +11,7 @@ use book::{
 use trading::auto_trading::{
                 TokenRegistry,
                 parse_token_registry,
+                resolve_wallet_address,
                 wallet_balance,
                 kyber_swap,
                 attempt_trade_with_actual_amount,
@@ -39,15 +40,17 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
 #[derive(Debug, Parser)]
+#[command(name = "maegen")]
 #[command(version = "1.1.0")]
 struct Args {
     blockchain: String,
     /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
     token: UppercaseString,
-    /// defaults to the vault -- override to run against any
-    /// other wallet, as long as its tokens are in data/{blockchain}.toml
-    #[arg(long, env = "VAULT_ADDRESS")]
-    wallet_address: String,
+    /// CLI override; falls back to VAULT_ADDRESS via `resolve_wallet_address`.
+    /// Defaults to the vault -- override to run against any other wallet, as
+    /// long as its tokens are in data/{blockchain}.toml
+    #[arg(long)]
+    wallet_address: Option<String>,
     /// defaults to the vault -- override alongside --wallet-address
     #[arg(long, env = "VAULT_KEYSTORE_PATH")]
     keystore_path: String,
@@ -56,7 +59,7 @@ struct Args {
     #[arg(short = 'd', long, default_value_t = false)]
     debug: bool,
     #[arg(long, default_value_t = DEFAULT_SLIPPAGE_BPS)]
-    slippage_bps: u16,    
+    slippage_bps: u16,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -166,7 +169,8 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
-    runoff_continuation(&args.blockchain, &args.token, &args.wallet_address, &args.keystore_path, args.slippage_bps, args.dry_run, args.debug).await
+    let wallet_address = resolve_wallet_address(args.wallet_address, "VAULT_ADDRESS")?;
+    runoff_continuation(&args.blockchain, &args.token, &wallet_address, &args.keystore_path, args.slippage_bps, args.dry_run, args.debug).await
 }
 
 //==========================================================================================
