@@ -25,7 +25,7 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 //=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.1.0")]
+#[command(version = "1.1.1")]
 struct Args {
     from_token: UppercaseString,
     blockchain: String,
