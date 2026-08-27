@@ -29,7 +29,6 @@ const DUST_EPSILON: f64 = 1e-8;
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
 const TRADE_LOG_HEADER: &str = "timestamp\tmode\ttoken\tundead_balance\ttoken_balance\ttoken_value_in_undead\tswap_undead\toutcome\tactual_received\tgas_avax\ttx_hash";
-const KEYSTORE_PATH_VAR: &str = "VAULT_KEYSTORE_PATH";
 
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
@@ -41,21 +40,21 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
 #[derive(Debug, Parser)]
-#[command(version = "1.0.0")]
+#[command(version = "1.1.0")]
 struct Args {
     blockchain: String,
     /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
     token: UppercaseString,
-    /// defaults to tva's wallet (the vault) -- override to run against any
+    /// defaults to the vault -- override to run against any
     /// other wallet, as long as its tokens are in data/{blockchain}.toml
-    #[arg(long, env = "TVA_WALLET_ADDRESS")]
+    #[arg(long, env = "VAULT_ADDRESS")]
     wallet_address: String,
-    /// defaults to tva's keystore -- override alongside --wallet-address
-    #[arg(long, env = "TVA_KEYSTORE_PATH")]
+    /// defaults to the vault -- override alongside --wallet-address
+    #[arg(long, env = "VAULT_KEYSTORE_PATH")]
     keystore_path: String,
     #[arg(long, default_value_t = false)]
     dry_run: bool,
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 'd', long, default_value_t = false)]
     debug: bool,
     /// hard-refused above MAX_SLIPPAGE_BPS (500 = 5%) -- see runoff_continuation
     #[arg(long, default_value_t = DEFAULT_SLIPPAGE_BPS)]
@@ -152,10 +151,8 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
 
     println!("  swapping {swap_amount:.8} UNDEAD -> {token}");
 
-    unsafe { std::env::set_var(KEYSTORE_PATH_VAR, keystore_path); }
-
     match attempt_trade_with_actual_amount(
-        &chain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
+        &chain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, keystore_path, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  SWAPPED  {swap_amount:.8} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
