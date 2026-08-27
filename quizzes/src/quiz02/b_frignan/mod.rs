@@ -10,7 +10,6 @@ use book::{
         cli_utils::generate_banner,
         err_utils::ErrStr,
         string_utils::{UppercaseString, s},
-        utils::get_env,
         file_utils::read_file,
         currency::usd::mk_usd
 };
@@ -25,11 +24,14 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 //=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.1.1")]
+#[command(version = "1.1.3")]
 struct Args {
-    from_token: UppercaseString,
+    /// The token you want to see the current price of.
+    token: UppercaseString,
+    /// The <blockchain>.toml to load (e.g. avalanche)
+    #[arg(long, default_value_t = s("avalanche"))]
     blockchain: String,
-
+    /// To see what is going on behind the scenes.
     #[arg(short, long)]
     debug: bool
 }
@@ -40,12 +42,10 @@ async fn runoff_continuation(blockchain: &str, from_token: &str, debug: bool) ->
     fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
         move |k| h.get(k).cloned().unwrap_or_else(|| k.to_string())
     }
-    let wallet_addy = get_env("WALLET_ADDRESS")?;
-    let keystore_addy = get_env("TVA_KEYSTORE_PATH")?;
     let tokens = read_file(&format!("data/{}.toml", blockchain))?;
     let registry = load_token_registry(&tokens)?;
     let block = lookup(&blockchains);
-    let ans = attempt_trade_with_actual_amount(&block(&blockchain), &wallet_addy, &registry, &from_token, "USDC", 1.0, 0.0, 1000, &keystore_addy, true, debug).await?;
+    let ans = attempt_trade_with_actual_amount(&block(&blockchain), "0x123", &registry, &from_token, "USDC", 1.0, 0.0, 1000, "xyz", true, debug).await?;
     if let DryRunWouldClear{quoted_amount_out} = ans{
         let price = mk_usd(quoted_amount_out as f32);
             println!("{from_token}'s price is {price}");
@@ -57,7 +57,7 @@ async fn runoff_continuation(blockchain: &str, from_token: &str, debug: bool) ->
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
-  runoff_continuation(&args.blockchain, &args.from_token, args.debug).await
+  runoff_continuation(&args.blockchain, &args.token, args.debug).await
 }
 
 //=========================================================================
