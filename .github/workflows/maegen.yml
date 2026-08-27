@@ -17,9 +17,6 @@ on:
 env:
   DAPP: maegen
 
-permissions:
-  contents: write
-
 jobs:
   run-maegen:
     runs-on: ubuntu-latest
@@ -112,22 +109,3 @@ jobs:
       - name: Delete keystore file
         if: always()
         run: rm -f "$RUNNER_TEMP/vault-keystore.json"
-
-      - name: Commit trade log to trading
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        env:
-          USER0_NAME:     ${{ vars.USER0_NAME }}
-          USER0_EMAIL:    ${{ secrets.USER0_EMAIL }}
-        run: |
-          cd trading
-          git config --local user.name "$USER0_NAME"
-          git config --local user.email "$USER0_EMAIL"
-          git add data/maegen-undead-btc.log
-
-          if git diff --staged --quiet; then
-            echo "Nothing to commit, skipping push"
-            exit 0
-          fi
-
-          git commit -m "maegen trade log update [skip ci]"
-          git push

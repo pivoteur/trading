@@ -132,7 +132,7 @@ jobs:
           cd trading
           git config --local user.name "$USER0_NAME"
           git config --local user.email "$USER0_EMAIL"
-          git add quizzes/data/tva-trades.log
+          git add data/tva-trades.log
 
           if git diff --staged --quiet; then
             echo "Nothing to commit, skipping push"
