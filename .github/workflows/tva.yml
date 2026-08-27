@@ -103,6 +103,7 @@ jobs:
           TVA_WALLET_ADDRESS:  ${{ secrets.TVA_WALLET_ADDRESS }}
           KEYSTORE_PASSWORD:   ${{ secrets.TVA_KEYSTORE_PASSWORD }}
           VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
+          TVA_LOG_PATH:        ${{ github.workspace }}/trading/data/tva-trades.log
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
