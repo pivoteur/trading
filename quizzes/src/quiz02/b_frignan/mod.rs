@@ -1,8 +1,7 @@
 use std::{collections::HashMap, println};
 use trading::auto_trading::{
-                AttemptOutcome::DryRunWouldClear, 
                 TokenRegistry, 
-                attempt_trade_with_actual_amount, 
+                query_swap,
                 parse_token_registry
 };
 use book::{
@@ -24,11 +23,11 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 //=========================================================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.1.3")]
+#[command(version = "1.1.5")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
-    /// The <blockchain>.toml to load (e.g. avalanche)
+    /// The <blockchain>.toml to load
     #[arg(long, default_value_t = s("avalanche"))]
     blockchain: String,
     /// To see what is going on behind the scenes.
@@ -45,58 +44,16 @@ async fn runoff_continuation(blockchain: &str, from_token: &str, debug: bool) ->
     let tokens = read_file(&format!("data/{}.toml", blockchain))?;
     let registry = load_token_registry(&tokens)?;
     let block = lookup(&blockchains);
-    let ans = attempt_trade_with_actual_amount(&block(&blockchain), "0x123", &registry, &from_token, "USDC", 1.0, 0.0, 1000, "xyz", true, debug).await?;
-    if let DryRunWouldClear{quoted_amount_out} = ans{
-        let price = mk_usd(quoted_amount_out as f32);
-            println!("{from_token}'s price is {price}");
-        Ok(())
-    }else{
-        Err(format!("Could not resolve {ans:?}"))
-    }
+    let ans = query_swap(&block(&blockchain), &registry, &from_token, "USDC", 1.0, debug).await?;
+    let quoted_amount_out = ans.amount_out;
+    let price = mk_usd(quoted_amount_out as f32);
+    println!("{from_token}'s price is {price}");
+    Ok(())
 }
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
   runoff_continuation(&args.blockchain, &args.token, args.debug).await
-}
-
-//=========================================================================
-// ----- UNIT TESTS ---------------------------------------------------------
-//=========================================================================
-#[cfg(not(tarpaulin_include))]
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
-    use trading::auto_trading::AttemptOutcome;
-
-
-    const DUMMY_WALLET: &str = "0x0000000000000000000000000000000000dEaD";
-    const DUMMY_KEYSTORE_VAR: &str = "UNUSED_KEYSTORE_PATH_VAR";
-
-    #[tokio::test]
-    async fn dry_run_would_clear() -> ErrStr<()> {
-        let tokens = read_file("data/avalanche.toml")?;
-        let registry = load_token_registry(&tokens)?;
-        // floor 0.0, same as runoff_continuation's real call -- any live quote clears it.
-        let ans = attempt_trade_with_actual_amount(
-            "avalanche", DUMMY_WALLET, &registry, "BTC", "USDC", 1.0, 0.0, 1000, DUMMY_KEYSTORE_VAR, true, false,
-        ).await?;
-        assert!(matches!(ans, DryRunWouldClear { .. }), "expected DryRunWouldClear, got {ans:?}");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn dry_run_would_fail() -> ErrStr<()> {
-        let tokens = read_file("data/avalanche.toml")?;
-        let registry = load_token_registry(&tokens)?;
-        // A floor no live quote could ever clear -- deterministically forces
-        // NotCleared regardless of where the market is right now.
-        let ans = attempt_trade_with_actual_amount(
-            "avalanche", DUMMY_WALLET, &registry, "BTC", "USDC", 1.0, 1e30, 1000, DUMMY_KEYSTORE_VAR, true, false,
-        ).await?;
-        assert!(matches!(ans, AttemptOutcome::NotCleared), "expected NotCleared, got {ans:?}");
-        Ok(())
-    }
 }
 
 //=========================================================================

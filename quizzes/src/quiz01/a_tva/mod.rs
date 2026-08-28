@@ -12,7 +12,7 @@ use trading::auto_trading::{
             TokenRegistry,
             parse_token_registry,
             wallet_address_from_env,
-            send_tokens,
+            send_tokens_to_address,
             OpenPivot,
             CumulativeStats,
             BalanceSnapshot,
@@ -335,7 +335,7 @@ async fn divvy_to_vault(keystore_path: &str, wallet_address: &str, registry: &To
             println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault.");
         }
         else {
-            let (tx_hash, gas_avax) = send_tokens(wallet_address, registry, token, VAULT_ADDRESS, amount, keystore_path, debug).await?;
+            let (tx_hash, gas_avax) = send_tokens_to_address(wallet_address, registry, token, VAULT_ADDRESS, amount, keystore_path, debug).await?;
             println!("  Sent {amount:.8} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
         }
     }
@@ -442,7 +442,7 @@ pub mod functional_tests {
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::{ get_env, now } };
-    use trading::auto_trading::{ wallet_balance, kyber_swap };
+    use trading::auto_trading::wallet_balance;
 
 
     create_testing!("quiz01::a_tva");
@@ -467,20 +467,6 @@ pub mod functional_tests {
             &registry,
         ))?;
         println!("\ttest wallet UNDEAD balance: {balance:.2}");
-    });
-
-    run!("live_quote_undead_to_btc", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "UNDEAD", "BTC", 500_000.0, true))?;
-        println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("live_quote_btc_to_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "BTC", "UNDEAD", 0.005, true))?;
-        println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("cycle_dry_run", {

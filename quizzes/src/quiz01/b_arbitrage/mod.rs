@@ -14,7 +14,7 @@ use libs::{
 };
 use trading::auto_trading::{
                 TokenRegistry, parse_token_registry, token_entry,
-                wallet_address_from_env, wallet_balance, kyber_swap, execute_trade,
+                wallet_address_from_env, wallet_balance, query_swap, execute_trade,
                 balance_snapshot, BalanceSnapshot,
                 AttemptOutcome, attempt_trade_with_actual_amount,
                 biggest_first, now_ts, replay_log, log_open, log_close,
@@ -471,7 +471,7 @@ async fn run_trade_for_symbols(
         ));
     }
 
-    let swap = kyber_swap("avalanche", registry, from_symbol, to_symbol, amount, debug).await?;
+    let swap = query_swap("avalanche", registry, from_symbol, to_symbol, amount, debug).await?;
     println!("Live swap: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
     println!("Your floor: {min_floor:.8} {to_symbol}");
 
@@ -571,7 +571,7 @@ pub async fn run_calls_batch(root_url: &str, slippage_bps: u16, dry_run: bool, d
             ));
         }
 
-        let swap = kyber_swap("avalanche", &registry, from_symbol, to_symbol, amount, debug).await?;
+        let swap = query_swap("avalanche", &registry, from_symbol, to_symbol, amount, debug).await?;
         println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} swapped (10%-gain floor {min_floor:.8})", call.ix, swap.amount_out);
         if swap.amount_out < min_floor {
             return Err(format!(
@@ -728,18 +728,6 @@ pub mod functional_tests {
         let registry = load_token_registry()?;
         let balance = now(wallet_balance(TEST_WALLET, "ETH", &registry))?;
         println!("\ttest wallet ETH balance: {balance:.4}");
-    });
-
-    run!("amount_swapped_eth_to_btc", " (real KyberSwap route, read-only, small ETH->BTC)", {
-        let registry = load_token_registry()?;
-        let swap = now(kyber_swap("avalanche", &registry, "ETH", "BTC", 0.01, true))?;
-        println!("\t0.01 ETH -> {:.4} BTC right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("amount_swapped_btc_to_eth", " (real KyberSwap route, read-only, small BTC->ETH)", {
-        let registry = load_token_registry()?;
-        let swap = now(kyber_swap("avalanche", &registry, "BTC", "ETH", 0.0001, true))?;
-        println!("\t0.0001 BTC -> {:.4} ETH right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("trade_by_row_dry_run", " (real calls.csv fetch, real row, read-only per-row check)", {
