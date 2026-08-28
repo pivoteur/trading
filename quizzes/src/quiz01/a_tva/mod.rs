@@ -45,7 +45,7 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 const BTC: &str = "BTC";
 const UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const BTC_TRADE_AMOUNT: f64 = 0.005;
-const SLIPPAGE_BPS: u16 = 500;
+const SLIPPAGE_BPS: u16 = 1000;
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //============================================================================
 //----- Trade Log — human-readable timestamps -----------------------------------
