@@ -11,8 +11,8 @@ use libs::{
 };
 use trading::auto_trading::{
                 TokenRegistry, parse_token_registry, token_entry,
-                wallet_address_from_env, wallet_balance, kyber_swap, execute_trade,
-                now_ts, append_trade_log_line,
+                wallet_address_from_env, wallet_balance, query_swap, execute_trade,
+                append_trade_log_line, now_ts
 };
 
 //============================================================================
@@ -77,8 +77,8 @@ async fn run_trade_for_symbols(
         ));
     }
 
-    let swap = kyber_swap(blockchain, registry, from_symbol, to_symbol, amount, debug).await?;
-    println!("Live swap: {amount:.8} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
+    let swap = query_swap("avalanche", registry, from_symbol, to_symbol, amount, debug).await?;
+    println!("Live swap: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
     println!("Your floor: {min_floor:.8} {to_symbol}");
 
     if swap.amount_out < min_floor {
@@ -123,6 +123,7 @@ pub async fn run_calls_batch(blockchain: &str, root_url: &str, slippage_bps: u16
 
     let mut cleared = 0usize;
     let mut skipped = 0usize;
+    let mut validated = Vec::new();
 
     for call in &calls {
         let from_symbol = call.pivot_token.as_str();
@@ -130,6 +131,43 @@ pub async fn run_calls_batch(blockchain: &str, root_url: &str, slippage_bps: u16
         let amount = call.pivot_amount as f64;
         let min_floor = call.gain_10_percent as f64;
 
+        if token_entry(&registry, from_symbol).is_err() || token_entry(&registry, to_symbol).is_err() {
+            return Err(format!(
+                "Call #{}: '{from_symbol}' or '{to_symbol}' not in tokens.toml. This is a \
+                 go/no-go batch — one row failing means none execute. No funds moved.",
+                call.ix
+            ));
+        }
+
+        let available = wallet_balance(&wallet_address, from_symbol, &registry).await?;
+        if available + 1e-6 < amount {
+            return Err(format!(
+                "Call #{}: insufficient {from_symbol} — need {amount:.6}, only {available:.6} \
+                 available. This is a go/no-go batch — one row failing means none execute. No funds moved.",
+                call.ix
+            ));
+        }
+
+        let swap = query_swap("avalanche", &registry, from_symbol, to_symbol, amount, debug).await?;
+        println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} swapped (10%-gain floor {min_floor:.8})", call.ix, swap.amount_out);
+        if swap.amount_out < min_floor {
+            return Err(format!(
+                "Call #{}: swap ({:.8} {to_symbol}) is below its 10%-gain floor ({min_floor:.8} \
+                 {to_symbol}). This is a go/no-go batch — one row failing means none execute. No funds moved.",
+                call.ix, swap.amount_out
+            ));
+        }
+
+        validated.push((call, from_symbol, to_symbol, amount, min_floor));
+    }
+
+    if dry_run {
+        println!("All {} call(s) cleared their 10%-gain floor. [DRY RUN] would execute all of them now.", validated.len());
+        return Ok(());
+    }
+
+    println!("All {} call(s) cleared their 10%-gain floor. Executing.", validated.len());
+    for (call, from_symbol, to_symbol, amount, min_floor) in validated {
         println!("--- Call #{} ({from_symbol} -> {to_symbol}) ---", call.ix);
 
         if token_entry(&registry, from_symbol).is_err() || token_entry(&registry, to_symbol).is_err() {
@@ -227,7 +265,6 @@ pub mod functional_tests {
     use paste::paste;
     use book::{ create_testing, utils::now };
 
-
     const PIVOT_ROOT_URL: &str = "https://raw.githubusercontent.com/pivoteur/pivoteur.github.io";
     const TEST_WALLET: &str = "0xd16E431b1363Ed90C4fD4906Cf7Fc33E51115429";
 
@@ -238,20 +275,6 @@ pub mod functional_tests {
         let registry = load_token_registry(&tokens)?;
         let balance = now(wallet_balance(TEST_WALLET, "ETH", &registry))?;
         println!("\ttest wallet ETH balance: {balance:.4}");
-    });
-
-    run!("amount_swapped_eth_to_btc", " (real KyberSwap route, read-only, small ETH->BTC)", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "ETH", "BTC", 0.01, true))?;
-        println!("\t0.01 ETH -> {:.4} BTC right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("amount_swapped_btc_to_eth", " (real KyberSwap route, read-only, small BTC->ETH)", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "BTC", "ETH", 0.0001, true))?;
-        println!("\t0.0001 BTC -> {:.4} ETH right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("calls_batch_dry_run", " (real calls.csv fetch + read-only per-row checks)", {

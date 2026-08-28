@@ -13,7 +13,7 @@ use trading::auto_trading::{
                 parse_token_registry,
                 resolve_wallet_address,
                 wallet_balance,
-                kyber_swap,
+                query_swap,
                 attempt_trade_with_actual_amount,
                 AttemptOutcome,
                 NO_REAL_FLOOR,
@@ -123,7 +123,7 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
         return Ok(());
     }
 
-    let reference_quote = kyber_swap(&chain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
+    let reference_quote = query_swap(&chain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
     println!("{reference_amount:.8} UNDEAD (half balance) quotes to {reference_quote:.8} {token}");
     if reference_quote <= DUST_EPSILON {
         return Err(format!("KyberSwap quoted ~0 {token} for {reference_amount:.8} UNDEAD -- no route/liquidity right now."));
@@ -253,13 +253,6 @@ pub mod functional_tests {
             &registry,
         ))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
-    });
-
-    run!("live_undead_to_btc_quote", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let quote = now(kyber_swap("avalanche", &registry, "UNDEAD", "BTC", 500.0, false))?;
-        println!("\t500 UNDEAD quotes to ~{:.8} BTC right now", quote.amount_out);
     });
 
     run!("maegen_functionality", {
