@@ -479,7 +479,7 @@ pub mod functional_tests {
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::now };
-    use trading::auto_trading::{ wallet_balance, kyber_swap };
+    use trading::auto_trading::wallet_balance;
 
     /// Fixed, hardcoded dummy test addresses -- never read from env
     const MANDI_ADDRESS: &str = "0x6700bD7EAE41434f566e48738813fC585B59669a";
@@ -507,20 +507,6 @@ pub mod functional_tests {
             &registry,
         ))?;
         println!("\ttest wallet UNDEAD balance: {balance:.2}");
-    });
-
-    run!("live_quote_undead_to_btc", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "UNDEAD", "BTC", 500_000.0, true))?;
-        println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("live_quote_btc_to_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(kyber_swap("avalanche", &registry, "BTC", "UNDEAD", 0.005, true))?;
-        println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("cycle_dry_run", {

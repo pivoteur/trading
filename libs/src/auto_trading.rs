@@ -175,13 +175,14 @@ pub async fn wallet_balance(
 //============================================================================
 /// A live quote plus everything needed to actually build and sign the swap
 /// afterward.
+#[derive(Debug)]
 pub struct KyberSwap {
     pub amount_out:         f64,
     pub route_summary_raw:  serde_json::Value,
     pub router_address:     String,
 }
 
-pub async fn kyber_swap(
+pub async fn query_swap(
     blockchain: &str,
     registry: &TokenRegistry,
     from_symbol: &str,
@@ -189,7 +190,7 @@ pub async fn kyber_swap(
     amount: f64,
     debug: bool
 ) -> ErrStr<KyberSwap> {
-    debug!("kyber_swap", debug);
+    debug!("query_swap", debug);
     let from_entry = token_entry(registry, from_symbol)?;
     let to_entry = token_entry(registry, to_symbol)?;
     let token_in = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?;
@@ -552,7 +553,7 @@ pub async fn attempt_trade_with_actual_amount(
     debug: bool,
 ) -> ErrStr<AttemptOutcome> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
-    let swap = kyber_swap(blockchain, registry, from_symbol, to_symbol, amount, debug).await?;
+    let swap = query_swap(blockchain, registry, from_symbol, to_symbol, amount, debug).await?;
     if swap.amount_out <= guaranteed_floor {
             debug_trade_result(None, "NOT CLEARED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
 
@@ -891,7 +892,25 @@ pub async fn send_tokens_to_address(
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use book::file_utils::read_file;
 
+    fn sample_registry() -> ErrStr<TokenRegistry> {
+       let tokens = read_file("../quizzes/data/avalanche.toml")?;
+       parse_token_registry(&tokens)
+   }
+
+   #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
+      let query = query_swap("avalanche", &sample_registry()?, "BTC", "ETH", 1.0, true).await;
+      assert!(query.is_ok());
+      Ok(())
+   }
+
+   #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
+      let query = query_swap("avalanche", &sample_registry()?, "BTC", "ETH", 1.0, true).await?;
+      let ratio = query.amount_out;
+      assert!(ratio > 16.0, "The ratio BTC/ETH is {ratio}");
+      Ok(())
+   }
 
     #[test]
     fn test_hex_to_u128_parses_rpc_style_hex() -> ErrStr<()> {
@@ -1126,7 +1145,7 @@ pub async fn execute_trade(
     if verbose {
         println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
     }
-    let fresh_quote = kyber_swap(blockchain, registry, from_symbol, to_symbol, amount, verbose).await?;
+    let fresh_quote = query_swap(blockchain, registry, from_symbol, to_symbol, amount, verbose).await?;
     if verbose {
         println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
     }

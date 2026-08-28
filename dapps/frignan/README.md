@@ -30,4 +30,7 @@ answer is Ok(DryRunWouldClear { quoted_amount_out: 64209.07... })
 
 ## Revisions
 
+* 1.1.5, 2026-08-28: CLAP provides default blockchain
+* 1.1.4, 2026-08-28: Calling query swap, no longer need wallet address nor 
+keystore path
 * 1.0.3, 2026-08-18: moved into production
