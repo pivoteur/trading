@@ -30,6 +30,10 @@ on:
   schedule:
     - cron: "0 * * * *"
 
+concurrency:
+  group: tva
+  cancel-in-progress: false
+
 env:
   DAPP: tva
 
@@ -64,14 +68,32 @@ jobs:
       - name: Establish git path
         run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
 
+      - name: Normalize workflow inputs
+        # workflow_dispatch defaults do NOT apply on the schedule trigger --
+        # github.event.inputs (and the inputs.* context) is empty there.
+        # Every later step reads ONLY these normalized env.* values, never
+        # raw inputs.* / github.event.inputs.*, so a manual run and an
+        # hourly scheduled run resolve to identical values.
+        run: |
+          echo "DRY_RUN=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_ENV
+          echo "DEBUG=${{ github.event.inputs.debug || 'false' }}" >> $GITHUB_ENV
+          echo "BLOCKCHAIN=${{ github.event.inputs.blockchain || 'avalanche' }}" >> $GITHUB_ENV
+          echo "BTC_TRADE_AMOUNT=${{ github.event.inputs.btc_trade_amount || '0.005' }}" >> $GITHUB_ENV
+          echo "UNDEAD_TRADE_AMOUNT=${{ github.event.inputs.undead_trade_amount || '500000' }}" >> $GITHUB_ENV
+          echo "LOG_PATH_INPUT=${{ github.event.inputs.log_path || '' }}" >> $GITHUB_ENV
+
       - name: Establish trade log path
-        # log_path, when given, is already a full path -- some people run
-        # tva locally without a "trading" subdir at all, so an override
-        # is used exactly as passed in. Only the default gets built
-        # relative to this workspace's trading checkout. Exported once
-        # here so "Run tva", the log-line safety net, and the commit
-        # step all agree on the same path without recomputing it.
-        run: echo "TVA_LOG_PATH=${{ github.event.inputs.log_path || format('{0}/trading/data/tva-trades.log', github.workspace) }}" >> $GITHUB_ENV
+        # a_tva_mod.rs's --log-path/TVA_LOG_PATH is a required runtime
+        # argument with no default of its own (it's deliberately not a
+        # compile-time CARGO_MANIFEST_DIR-derived const), and there's no
+        # pre-existing shared env var for it the way DAPP_DIR/DAPPS_DIR
+        # come from trading-env.yml. So this workflow has to build a full,
+        # cwd-independent default path itself -- that's what lets the
+        # hourly schedule run every hour with nobody passing log_path by
+        # hand. A provided log_path input is expected to already be a full
+        # path and is used exactly as given. "Run tva", the log-line
+        # safety net, and the commit step all read this same $TVA_LOG_PATH.
+        run: echo "TVA_LOG_PATH=${LOG_PATH_INPUT:-$GITHUB_WORKSPACE/trading/data/tva-trades.log}" >> $GITHUB_ENV
 
       - name: Cache tva binary
         id: binary-cache
@@ -100,13 +122,14 @@ jobs:
 
       - name: Show input parameters
         run: |
-          echo "=== Running tva with manual inputs ==="
-          echo "dry_run: ${{ inputs.dry_run }}"
-          echo "debug: ${{ inputs.debug }}"
-          echo "blockchain: ${{ inputs.blockchain }}"
-          echo "btc_trade_amount: ${{ inputs.btc_trade_amount }}"
-          echo "undead_trade_amount: ${{ inputs.undead_trade_amount }}"
-          echo "log_path: ${{ inputs.log_path }} (blank means default)"
+          echo "=== Running tva with resolved inputs (manual or scheduled) ==="
+          echo "dry_run: $DRY_RUN"
+          echo "debug: $DEBUG"
+          echo "blockchain: $BLOCKCHAIN"
+          echo "btc_trade_amount: $BTC_TRADE_AMOUNT"
+          echo "undead_trade_amount: $UNDEAD_TRADE_AMOUNT"
+          echo "log_path: $TVA_LOG_PATH"
+
       - name: Build tva
         if: steps.binary-cache.outputs.cache-hit != 'true'
         run: |
@@ -119,6 +142,10 @@ jobs:
         env:
           TVA_KEYSTORE_JSON: ${{ secrets.TVA_KEYSTORE_JSON }}
         run: |
+          if [ -z "$TVA_KEYSTORE_JSON" ]; then
+            echo "::error::TVA_KEYSTORE_JSON secret is empty -- refusing to write an empty keystore file. Set the TVA_KEYSTORE_JSON repo secret before running this workflow."
+            exit 1
+          fi
           echo "$TVA_KEYSTORE_JSON" > "$RUNNER_TEMP/tva-keystore.json"
           echo "TVA_KEYSTORE_PATH=$RUNNER_TEMP/tva-keystore.json" >> $GITHUB_ENV
 
@@ -129,20 +156,20 @@ jobs:
           VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
         run: |
           ARGS=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
-          if [ "${{ github.event.inputs.debug }}" = "true" ]; then
+          if [ "$DEBUG" = "true" ]; then
             ARGS="$ARGS --debug"
           fi
-          if [ -n "${{ github.event.inputs.blockchain }}" ]; then
-            ARGS="$ARGS --blockchain ${{ github.event.inputs.blockchain }}"
+          if [ -n "$BLOCKCHAIN" ]; then
+            ARGS="$ARGS --blockchain $BLOCKCHAIN"
           fi
-          if [ -n "${{ github.event.inputs.btc_trade_amount }}" ]; then
-            ARGS="$ARGS --btc-trade-amount ${{ github.event.inputs.btc_trade_amount }}"
+          if [ -n "$BTC_TRADE_AMOUNT" ]; then
+            ARGS="$ARGS --btc-trade-amount $BTC_TRADE_AMOUNT"
           fi
-          if [ -n "${{ github.event.inputs.undead_trade_amount }}" ]; then
-            ARGS="$ARGS --undead-trade-amount ${{ github.event.inputs.undead_trade_amount }}"
+          if [ -n "$UNDEAD_TRADE_AMOUNT" ]; then
+            ARGS="$ARGS --undead-trade-amount $UNDEAD_TRADE_AMOUNT"
           fi
           ARGS="$ARGS div --pct 25"
           echo "=== Running tva with args: $ARGS ==="
@@ -169,7 +196,11 @@ jobs:
         run: rm -f "$RUNNER_TEMP/tva-keystore.json"
 
       - name: Commit trade log to trading
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        # Explicit success() so a failure earlier in the job (which would
+        # already implicitly skip this step) can never be masked by a
+        # future edit to this condition -- only commit on a clean,
+        # non-dry-run run.
+        if: ${{ success() && env.DRY_RUN != 'true' }}
         env:
           USER0_NAME:     ${{ vars.USER0_NAME }}
           USER0_EMAIL:    ${{ secrets.USER0_EMAIL }}
