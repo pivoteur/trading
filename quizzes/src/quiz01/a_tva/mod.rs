@@ -30,17 +30,13 @@ use trading::auto_trading::{
             NO_REAL_FLOOR,
 };
 
-//============================================================================
 //----- Token Registry --------------------------------------------------------
-//============================================================================
 const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
 pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
     parse_token_registry(tokens)
 }
-//============================================================================
 //----- Fixed Trade Sizes ------------------------------------------------------
-//============================================================================
 // tvá trades exactly one pair, BTC<->UNDEAD (unlike arbitrage, which
 // surveys many pools). Named as a constant to match UNDEAD below.
 const BTC: &str = "BTC";
@@ -48,19 +44,15 @@ const DEFAULT_UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const DEFAULT_BTC_TRADE_AMOUNT: f64 = 0.005;
 const SLIPPAGE_BPS: u16 = 30;
 const DEFAULT_DIV_PCT: f64 = 25.0;
-//============================================================================
 //----- Reporting -----------------------------------------------------------
-//============================================================================
 // What tvá's wallet actually started with, for the daily report's "started
 // with..." line -- historical, not derived from the log.
 const STARTING_UNDEAD_CAPITAL: f64 = 5_000_000.0;
 const STARTING_BTC_CAPITAL: f64 = 0.05;
-//============================================================================
 //----- Trade Log — human-readable timestamps -----------------------------------
-//============================================================================
-// Log path is a required runtime argument (--log-path / TVA_LOG_PATH), not
-// a compile-time const -- so a real run and a functional test can point at
-// different logs without a rebuild.
+// Log path is a required runtime argument (--log-path), not a compile-time
+// const -- so a real run and a functional test can point at different logs
+// without a rebuild. CLI-only, no env fallback -- it's always passed in.
 
 fn human_ts(epoch: u64) -> String {
     DateTime::<Utc>::from_timestamp(epoch as i64, 0)
@@ -79,9 +71,7 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, I
     replay_log(path)
 }
 
-//============================================================================
 //----- Cycle Context & State ---------------------------------------------------
-//============================================================================
 // Everything a single cycle needs that stays constant for its whole duration
 // (wallet, secrets, chain, registry, the dry-run/debug flags) lives here once,
 // instead of being threaded through every helper fn as its own parameter --
@@ -120,9 +110,7 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
     open_pivots.iter().filter(|p| p.proper == token).map(|p| p.proper_amount).sum()
 }
 
-//============================================================================
 //----- One Trading Cycle -------------------------------------------------------
-//============================================================================
 // `wallet_address`/`vault_address` are plain parameters, not resolved from
 // env in here -- only `runoff_with_args` (the CLI entrypoint) does that,
 // via `resolve_wallet_address`. See the `Args` struct below.
@@ -368,9 +356,7 @@ async fn pivot_survey(ctx: &CycleCtx<'_>, state: &mut CycleState, closed_somethi
     }
 }
 
-//============================================================================
 //----- div: sending a cut of the surplus to Vault -----------------------------
-//============================================================================
 fn compute_div_amount(pct: f64, gain: f64) -> f64 { pct / 100.0 * gain }
 
 // `ctx.dry_run` doubles as this fn's own dry-run flag -- `pivot_survey` only
@@ -396,12 +382,10 @@ async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) ->
     Ok(())
 }
 
-//============================================================================
 //----- CLI --------------------------------------------------------------------
-//============================================================================
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.6.0")]
+#[command(version = "1.7.0")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -415,8 +399,9 @@ struct Args {
     /// subcommand — `tva --dry-run div` and `tva div --dry-run` both work.
     #[arg(long, env = "TVA_KEYSTORE_PATH")]
     keystore_path: String,
-    /// Required, no default -- a missing log means missing history, not a fresh start.
-    #[arg(long, env = "TVA_LOG_PATH")]
+    /// Required, no default, CLI-only (no env fallback) -- a missing log
+    /// means missing history, not a fresh start.
+    #[arg(long)]
     log_path: String,
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
@@ -454,9 +439,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     run_cycle(&wallet_address, &vault_address, &args.keystore_path, &args.log_path, &args.blockchain, args.btc_trade_amount, args.undead_trade_amount, pct, args.dry_run, args.debug).await
 }
 
-//============================================================================
 //----- UNIT TESTS -------------------------------------------------------------
-//============================================================================
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -515,9 +498,7 @@ mod unit_tests {
     }
 }
 
-//============================================================================
 //----- FUNCTIONAL TESTS -------------------------------------------------------
-//============================================================================
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 pub mod functional_tests {
@@ -552,6 +533,17 @@ pub mod functional_tests {
             &registry,
         ))?;
         println!("\ttest wallet UNDEAD balance: {balance:.2}");
+    });
+
+    run!("wallet_balance_avax_native_coin_branch", {
+        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
+        let registry = load_token_registry(&tokens)?;
+        let balance = now(wallet_balance(
+            TEST_MANDI_ADDRESS,
+            "AVAX",
+            &registry,
+        ))?;
+        println!("\ttest wallet AVAX (native) balance: {balance:.5}");
     });
 
     run!("live_quote_undead_to_btc", {

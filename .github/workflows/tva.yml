@@ -83,16 +83,8 @@ jobs:
           echo "LOG_PATH_INPUT=${{ github.event.inputs.log_path || '' }}" >> $GITHUB_ENV
 
       - name: Establish trade log path
-        # a_tva_mod.rs's --log-path/TVA_LOG_PATH is a required runtime
-        # argument with no default of its own (it's deliberately not a
-        # compile-time CARGO_MANIFEST_DIR-derived const), and there's no
-        # pre-existing shared env var for it the way DAPP_DIR/DAPPS_DIR
-        # come from trading-env.yml. So this workflow has to build a full,
-        # cwd-independent default path itself -- that's what lets the
-        # hourly schedule run every hour with nobody passing log_path by
-        # hand. A provided log_path input is expected to already be a full
-        # path and is used exactly as given. "Run tva", the log-line
-        # safety net, and the commit step all read this same $TVA_LOG_PATH.
+        # tva's --log-path is a required, CLI-only runtime
+        # argument -- no env fallback
         run: echo "TVA_LOG_PATH=${LOG_PATH_INPUT:-$GITHUB_WORKSPACE/trading/data/tva-trades.log}" >> $GITHUB_ENV
 
       - name: Cache tva binary
@@ -170,6 +162,9 @@ jobs:
           fi
           if [ -n "$UNDEAD_TRADE_AMOUNT" ]; then
             ARGS="$ARGS --undead-trade-amount $UNDEAD_TRADE_AMOUNT"
+          fi
+          if [ -n "$TVA_LOG_PATH" ]; then
+            ARGS="$ARGS --log-path $TVA_LOG_PATH"
           fi
           ARGS="$ARGS div --pct 25"
           echo "=== Running tva with args: $ARGS ==="
