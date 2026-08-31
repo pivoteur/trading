@@ -42,7 +42,7 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 const BTC: &str = "BTC";
 const DEFAULT_UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const DEFAULT_BTC_TRADE_AMOUNT: f64 = 0.005;
-const SLIPPAGE_BPS: u16 = 30;
+const SLIPPAGE_BPS: u16 = 500;
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //----- Reporting -----------------------------------------------------------
 // What tvá's wallet actually started with, for the daily report's "started
