@@ -15,6 +15,18 @@ on:
         description: 'Which chain (data/{blockchain}.toml) to trade against?'
         type: string
         default: 'avalanche'
+      btc_trade_amount:
+        description: 'BTC amount to open a new BTC->UNDEAD position with each cycle'
+        type: string
+        default: '0.005'
+      undead_trade_amount:
+        description: 'UNDEAD amount to open a new UNDEAD->BTC position with each cycle'
+        type: string
+        default: '500000'
+      log_path:
+        description: 'Full trade log path. Leave blank for the default (trading/data/tva-trades.log under the runner workspace).'
+        type: string
+        default: ''
   schedule:
     - cron: "0 * * * *"
 
@@ -52,6 +64,15 @@ jobs:
       - name: Establish git path
         run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
 
+      - name: Establish trade log path
+        # log_path, when given, is already a full path -- some people run
+        # tva locally without a "trading" subdir at all, so an override
+        # is used exactly as passed in. Only the default gets built
+        # relative to this workspace's trading checkout. Exported once
+        # here so "Run tva", the log-line safety net, and the commit
+        # step all agree on the same path without recomputing it.
+        run: echo "TVA_LOG_PATH=${{ github.event.inputs.log_path || format('{0}/trading/data/tva-trades.log', github.workspace) }}" >> $GITHUB_ENV
+
       - name: Cache tva binary
         id: binary-cache
         uses: actions/cache@v4
@@ -83,6 +104,9 @@ jobs:
           echo "dry_run: ${{ inputs.dry_run }}"
           echo "debug: ${{ inputs.debug }}"
           echo "blockchain: ${{ inputs.blockchain }}"
+          echo "btc_trade_amount: ${{ inputs.btc_trade_amount }}"
+          echo "undead_trade_amount: ${{ inputs.undead_trade_amount }}"
+          echo "log_path: ${{ inputs.log_path }} (blank means default)"
       - name: Build tva
         if: steps.binary-cache.outputs.cache-hit != 'true'
         run: |
@@ -103,7 +127,6 @@ jobs:
           TVA_WALLET_ADDRESS:  ${{ secrets.TVA_WALLET_ADDRESS }}
           KEYSTORE_PASSWORD:   ${{ secrets.TVA_KEYSTORE_PASSWORD }}
           VAULT_ADDRESS:       ${{ secrets.VAULT_ADDRESS }}
-          TVA_LOG_PATH:        ${{ github.workspace }}/trading/data/tva-trades.log
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
@@ -115,9 +138,31 @@ jobs:
           if [ -n "${{ github.event.inputs.blockchain }}" ]; then
             ARGS="$ARGS --blockchain ${{ github.event.inputs.blockchain }}"
           fi
+          if [ -n "${{ github.event.inputs.btc_trade_amount }}" ]; then
+            ARGS="$ARGS --btc-trade-amount ${{ github.event.inputs.btc_trade_amount }}"
+          fi
+          if [ -n "${{ github.event.inputs.undead_trade_amount }}" ]; then
+            ARGS="$ARGS --undead-trade-amount ${{ github.event.inputs.undead_trade_amount }}"
+          fi
           ARGS="$ARGS div --pct 25"
           echo "=== Running tva with args: $ARGS ==="
           $DAPP $ARGS
+
+      - name: Show new trade log lines (safety net if the commit step doesn't run)
+        # if: always() so this still runs even if "Run tva" failed or a
+        # later step blows up before the commit step gets there -- a row
+        # that was really appended to the log file must never only exist
+        # on the runner's disk, which is gone once the job ends.
+        if: always()
+        run: |
+          cd trading
+          NEW_LINES=$(git diff --unified=0 -- "$TVA_LOG_PATH" | grep -E '^\+[^+]' || true)
+          if [ -n "$NEW_LINES" ]; then
+            echo "=== New trade log line(s) this run (not yet committed) ==="
+            echo "$NEW_LINES"
+          else
+            echo "No new trade log lines this run."
+          fi
 
       - name: Delete keystore file
         if: always()
@@ -132,7 +177,7 @@ jobs:
           cd trading
           git config --local user.name "$USER0_NAME"
           git config --local user.email "$USER0_EMAIL"
-          git add data/tva-trades.log
+          git add "$TVA_LOG_PATH"
 
           if git diff --staged --quiet; then
             echo "Nothing to commit, skipping push"
