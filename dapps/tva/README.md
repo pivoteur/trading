@@ -73,6 +73,7 @@ totals. `--dry-run` still writes zero log entries, MISFIRE included.
 
 ## Revisions
 
+* 1.7.2, 2026-08-31: slippage adjustment from 5% (500) to 10% (1000).
 * 1.7.1, 2026-08-31: adding tests for the new functions added.
 * 1.7.0, 2026-08-31: `--btc-trade-amount`/`--undead-trade-amount` replace
 the old hardcoded trade-size consts, and `--log-path` is now a required

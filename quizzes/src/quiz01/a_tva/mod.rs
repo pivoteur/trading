@@ -385,7 +385,7 @@ async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) ->
 //----- CLI --------------------------------------------------------------------
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.7.1")]
+#[command(version = "1.7.2")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
