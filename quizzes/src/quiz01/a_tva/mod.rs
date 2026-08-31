@@ -385,7 +385,7 @@ async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) ->
 //----- CLI --------------------------------------------------------------------
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.7.0")]
+#[command(version = "1.7.1")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -403,12 +403,13 @@ struct Args {
     /// means missing history, not a fresh start.
     #[arg(long)]
     log_path: String,
+    /// Dry-run mode to see what pivots WOULD do, no funds moved or used.
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
-    /// debug mode (e.g. --debug or -d)
+    /// debug mode to see what is going on behind the scenes.
     #[arg(short = 'd', global = true, long, default_value_t = false)]
     debug: bool,
-    /// Which chain's data/{blockchain}.toml to load. (e.g. 'avalanche')
+    /// Which chain's data/{blockchain}.toml to load.
     #[arg(long, global = true, default_value = "avalanche")]
     blockchain: String,
     /// Amount of BTC to open a new BTC->UNDEAD position with each cycle.
@@ -495,6 +496,64 @@ mod unit_tests {
         ]).expect("should parse with both trade-amount flags given");
         assert_eq!(overridden.btc_trade_amount, 0.001, "--btc-trade-amount must actually override the default");
         assert_eq!(overridden.undead_trade_amount, 100_000.0, "--undead-trade-amount must actually override the default");
+    }
+
+    #[test]
+    fn test_log_path_is_required_and_cli_only() {
+        let result = Args::try_parse_from(["tva", "--keystore-path", "unused"]);
+        assert!(result.is_err(), "log_path has no default and no env fallback -- omitting --log-path must fail to parse");
+    }
+
+    #[test]
+    fn test_amount_decimals_undead_vs_everything_else() {
+        assert_eq!(amount_decimals(UNDEAD), 8, "UNDEAD must show 8 decimals");
+        assert_eq!(amount_decimals(BTC), 4, "BTC must show 4 decimals");
+        assert_eq!(amount_decimals("AVAX"), 4, "anything that isn't UNDEAD must fall back to 4 decimals");
+    }
+
+    #[test]
+    fn test_compute_div_amount() {
+        assert_eq!(compute_div_amount(25.0, 100.0), 25.0, "25% of a 100.0 gain is 25.0");
+        assert_eq!(compute_div_amount(0.0, 100.0), 0.0, "0% div sends nothing");
+        assert_eq!(compute_div_amount(25.0, -40.0), -10.0, "a negative gain scales through the same way -- callers check amount <= 0.0 themselves");
+    }
+
+    #[test]
+    fn test_human_ts_formats_a_normal_epoch_without_the_fallback() {
+        let formatted = human_ts(0);
+        assert!(!formatted.starts_with("(bad timestamp"), "epoch 0 is well within range and must format normally, got: '{formatted}'");
+        assert_eq!(formatted.len(), 19, "expected 'YYYY-MM-DD HH:MM:SS' (19 chars), got: '{formatted}'");
+    }
+
+    #[test]
+    fn test_human_ts_falls_back_on_unparseable_epoch() {
+        // 1u64 << 63, reinterpreted as i64, is i64::MIN seconds -- far outside
+        // chrono's representable date range, so from_timestamp returns None
+        // and human_ts must hit its unwrap_or_else fallback, not panic.
+        let formatted = human_ts(1u64 << 63);
+        assert!(formatted.starts_with("(bad timestamp:"), "an epoch chrono can't represent must hit the fallback branch, got: '{formatted}'");
+    }
+
+    #[test]
+    fn test_committed_amt_sums_only_the_matching_proper_token() -> ErrStr<()> {
+        let path = std::env::temp_dir().join("tva_test_committed_amt.log");
+        let path_str = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
+             1970-01-01 01:00:00\tOPEN\t2\t\t\tBTC\tUNDEAD\t0.00500000\t495000.00000000\t\t\t\t0.00021000\t0xdef\n",
+        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+
+        let (opens, ..) = replay_log_with_history_required(path_str)?;
+        assert_eq!(opens.len(), 2, "both fixture rows should replay as still-open pivots");
+
+        let btc_committed = committed_amt(BTC, &opens);
+        let undead_committed = committed_amt(UNDEAD, &opens);
+        assert!((btc_committed - 0.00502601).abs() < 1e-8, "only pivot #1 (proper=BTC) should count toward committed BTC, got {btc_committed}");
+        assert!((undead_committed - 495_000.0).abs() < 1e-6, "only pivot #2 (proper=UNDEAD) should count toward committed UNDEAD, got {undead_committed}");
+
+        let _ = std::fs::remove_file(&path);
+        Ok(())
     }
 }
 
