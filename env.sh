@@ -1,0 +1,2 @@
+export TRADING_DATA_DIR=data
+export TRADING_TOKEN_DIR=$TRADING_DATA_DIR/tokens
