@@ -7,12 +7,16 @@ available.
 
 ## Usage
 
-`$ tva [--dry-run] [--debug] [--blockchain <chain>]`
+`$ tva --log-path <path> [--dry-run] [--debug] [--blockchain <chain>] [--btc-trade-amount <amount>] [--undead-trade-amount <amount>]`
 
-`$ tva [--dry-run] [--debug] [--blockchain <chain>] div [--pct <PERCENT>]`
+`$ tva --log-path <path> [--dry-run] [--debug] [--blockchain <chain>] [--btc-trade-amount <amount>] [--undead-trade-amount <amount>] div [--pct <PERCENT>]`
 
 where:
 
+* `--log-path <path>` required, CLI-only (no env fallback) — path to the
+  trade log to replay and append to. A missing or wrong path is a hard
+  error: tvá's history is real and pre-existing, so a missing log means
+  the path is wrong, not that this is a fresh start.
 * `[--dry-run]` checks only — never touches the keystore or sends a tx, no
   log entries written for opens or closes. Applies to `div` too: the cycle
   it runs first moves no funds, and the vault transfer itself becomes a
@@ -23,14 +27,20 @@ where:
 * `[--blockchain <chain>]` selects which chain's token registry to load,
   from `data/<chain>.toml` — defaults to `avalanche` (tvá's only chain to
   date), so it can be omitted entirely for existing usage.
+* `[--btc-trade-amount <amount>]` amount of BTC to open a new BTC->UNDEAD
+  position with each cycle. Defaults to `0.005`.
+* `[--undead-trade-amount <amount>]` amount of UNDEAD to open a new
+  UNDEAD->BTC position with each cycle. Defaults to `500000`.
 * `div [--pct <PERCENT>]` runs the cycle, then sends `--pct` of the
   sendable surplus above starting capital to Vault. Default `25.0`; accepts
   any value `0`–`100`. The remainder ("trim") simply stays in `tva`'s own
   wallet — there's no separate transfer for it.
 
-> n.b: `--dry-run`, `--debug`, and `--blockchain` all belong to the
+> n.b: `--log-path`, `--dry-run`, `--debug`, `--blockchain`,
+> `--btc-trade-amount`, and `--undead-trade-amount` all belong to the
 > top-level command, not to `div` — put them *before* `div` on the command
-> line (`tva --dry-run --debug div --pct 5`, not the other way around).
+> line (`tva --log-path tva-trades.log --dry-run --debug div --pct 5`, not
+> the other way around).
 
 > n.b: `TVA_WALLET_ADDRESS` and `TVA_KEYSTORE_PATH` must be set as
 > environmental variables — distinct names from `arbitrage`'s
@@ -40,7 +50,9 @@ where:
 > `KEYSTORE_PASSWORD` is optional — set it for unattended runs (e.g. CI);
 > omit it locally to be prompted interactively instead. `TVA_EXPECTED_WALLET`
 > is optional — set it to hard-fail on a `TVA_WALLET_ADDRESS` mismatch
-> instead of silently reading the wrong wallet's balance.
+> instead of silently reading the wrong wallet's balance. `--log-path` has
+> no env equivalent — unlike the two above, it must always be passed on
+> the command line.
 
 * [source](../../quizzes/src/quiz01/a_tva/mod.rs)
 
@@ -61,7 +73,14 @@ totals. `--dry-run` still writes zero log entries, MISFIRE included.
 
 ## Revisions
 
-* 1.4.2, 2026-08-25: removed the keystore_path_var being passed in
+* 1.7.2, 2026-08-31: slippage adjustment from 5% (500) to 10% (1000).
+* 1.7.1, 2026-08-31: adding tests for the new functions added.
+* 1.7.0, 2026-08-31: `--btc-trade-amount`/`--undead-trade-amount` replace
+the old hardcoded trade-size consts, and `--log-path` is now a required
+CLI flag (previously CARGO_MANIFEST_DIR-derived); the cycle summary is now
+a scoreboard against starting capital (open pivots, pool ROI/APR, total
+gains, gas used, live wallet gas balance).
+* 1.4.2, 2026-08-25: removed the keystore_path_var being passed in 
 * 1.3.1, 2026-08-24: consistent decimals and slippage adjustment
 * 1.3.0 , 2026-08-24: `tva` had some cases were the pivots that can be closed 
 were not being closed. That is hopfully addressed now. And, revision on the 
