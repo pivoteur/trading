@@ -1,6 +1,8 @@
 # trading
 Systems and tools that facilitate trading
 
+* [HOWTO](how_to_tva.md) set up and operate a `tva` pivot pool
+
 # Directory layout
 
 * [dapps](dapps): contains the programs that automate trading
