@@ -40,15 +40,15 @@ Once installed, run: `cast wallet import <name> --interactive` Where: `<name>` i
  1. "Enter private key:" 
     - This is from your digital wallet's address.
     - Inside of _MetaMask_ → _account menu_ → _Account details_ → _Show private key_ → _enter your MetaMask password_ → copy it and paste it within the interaction.
- 2. "Enter keystore password:" 
-    - This is a password that you set for the program to do the trades without human input. (This is inportant for _Step III_, save it)
+ 2. "Enter password:" 
+    - This is a password that you set for the program to do the trades without human input. (This is important for _Step III_, save it)
     - And, this writes the encrypted V3 keystore JSON to `~/.foundry/keystores/<name>`.
     - Ensure no typos as you cannot physically see what the characters are.
 ## Step III
 Verify all dependencies are set by running these commands:
  * `cast wallet address --account <name>` to confirm your wallet's address. This is the first secret for GitHub.
  * `cat ~/.foundry/keystores/<name>` to confirm and produce the JSON blob you need as one of the secrets. This the second secret for GitHub.
- * The "_Enter keystore password_" you set is the third secret for GitHub.
+ * The "_Enter password_" you set is the third secret for GitHub.
 ## Step IV
  * Add these three dependencies to your GitHub's repository secrets.
  * export the `wallet address` and the `~/.foundry/keystores/<name>` path, locally within `~/.bashrc`
