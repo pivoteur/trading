@@ -26,6 +26,8 @@ use trading::auto_trading::{
             log_open,
             log_close,
             log_misfire,
+            report_misfire,
+            MisfireStage,
             UNDEAD,
             NO_REAL_FLOOR,
 };
@@ -42,7 +44,7 @@ pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
 const BTC: &str = "BTC";
 const DEFAULT_UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const DEFAULT_BTC_TRADE_AMOUNT: f64 = 0.005;
-const SLIPPAGE_BPS: u16 = 0; // 0% 
+const SLIPPAGE_BPS: u16 = 0; // 0%
 const DEFAULT_DIV_PCT: f64 = 25.0;
 //----- Reporting -----------------------------------------------------------
 // What tvá's wallet actually started with, for the daily report's "started
@@ -252,7 +254,7 @@ async fn open_trade(ctx: &CycleCtx<'_>, state: &mut CycleState, snap: &mut Balan
         }
         Ok(AttemptOutcome::NotCleared) => println!("  ! unexpected: #{pivot_id:<4} {from}->{to} open quote didn't clear the near-zero floor — check the pool."),
         Err(e) => {
-            println!("  ! open ({from}->{to}) failed: {e}");
+            report_misfire(MisfireStage::Open, None, from, to, amount, &e);
             if !ctx.dry_run {
                 log_misfire(ctx.log_path, None, from, to, amount, 0.0, "", &*snap, &state.running_stats);
             }
@@ -340,7 +342,7 @@ async fn pivot_survey(ctx: &CycleCtx<'_>, state: &mut CycleState, closed_somethi
             );
         }
         Err(e) => {
-            println!("  ! close attempt for pivot #{} failed, staying open: {e}", pivot.pivot_id);
+            report_misfire(MisfireStage::Close, Some(pivot.pivot_id), &pivot.prim, &pivot.proper, pivot.prim_amount, &e);
             if !ctx.dry_run {
                 let snap = balance_snapshot(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await
                     .unwrap_or_else(|snap_err| {
@@ -385,7 +387,7 @@ async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) ->
 //----- CLI --------------------------------------------------------------------
 #[derive(Debug, Parser)]
 #[command(name = "tva")]
-#[command(version = "1.8.0")]
+#[command(version = "1.8.1")]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
