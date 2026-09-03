@@ -866,21 +866,19 @@ pub async fn send_tokens_to_address(
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use book::file_utils::read_file;
-
-    fn sample_registry() -> ErrStr<TokenRegistry> {
-       let tokens = read_file("../quizzes/data/avalanche.toml")?;
-       parse_token_registry(&tokens)
-   }
+    use crate::tokens::load_tokens;
+    use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
-      let query = query_swap("avalanche", &sample_registry()?, "BTC", "ETH", 1.0, true).await;
+      let tokens = load_tokens(AVALANCHE).await?;
+      let query = query_swap("avalanche", &tokens, "BTC", "ETH", 1.0, true).await;
       assert!(query.is_ok());
       Ok(())
    }
 
    #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
-      let query = query_swap("avalanche", &sample_registry()?, "BTC", "ETH", 1.0, true).await?;
+      let tokens = load_tokens(AVALANCHE).await?;
+      let query = query_swap("avalanche", &tokens, "BTC", "ETH", 1.0, true).await?;
       let ratio = query.amount_out;
       assert!(ratio > 16.0, "The ratio BTC/ETH is {ratio}");
       Ok(())
