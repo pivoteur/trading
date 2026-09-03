@@ -10,7 +10,7 @@ on:
       debug:
         description: 'Debug mode (show what is going on behind the scenes)?'
         type: boolean
-        default: false
+        default: true
   schedule:
     - cron: "0 * * * *"
 
