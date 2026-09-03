@@ -73,6 +73,7 @@ totals. `--dry-run` still writes zero log entries, MISFIRE included.
 
 ## Revisions
 
+* 1.8.1, 2026-09-03: Added debugging to the misfires.
 * 1.8.0, 2026-09-02: slippage tolerance adjusted from 10% to 0% to combat a bug where
 pivots that can be closed even if the gain is small isn't closuing. All gains needs
 to close.
