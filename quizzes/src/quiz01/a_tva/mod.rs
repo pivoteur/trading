@@ -7,10 +7,12 @@ use book::{
         file_utils::read_file,
         parse_args_add_banner,
 };
-use libs::types::util::Id;
-use trading::auto_trading::{
-            TokenRegistry,
-            parse_token_registry,
+use libs::types::{
+   blockchains::{ Blockchain, Blockchain::AVALANCHE },
+   util::Id
+};
+use trading::{
+   auto_trading::{
             resolve_wallet_address,
             send_tokens_to_address,
             wallet_balance,
@@ -27,15 +29,14 @@ use trading::auto_trading::{
             log_close,
             log_misfire,
             UNDEAD,
-            NO_REAL_FLOOR,
+            NO_REAL_FLOOR
+   },
+   tokens::{ load_tokens }
 };
 
 //----- Token Registry --------------------------------------------------------
-const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+// const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
 //----- Fixed Trade Sizes ------------------------------------------------------
 // tvá trades exactly one pair, BTC<->UNDEAD (unlike arbitrage, which
 // surveys many pools). Named as a constant to match UNDEAD below.
@@ -117,7 +118,7 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
 #[allow(clippy::too_many_arguments)]
 pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &str, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
     let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
-    let registry = load_token_registry(&tokens)?;
+    let registry = load_tokens(&tokens)?;
     let ctx = CycleCtx { wallet_address, vault_address, keystore_path, log_path, blockchain, registry: &registry, dry_run, debug };
 
     let (open_pivots0, next_pivot_id, next_close_id, opening_stats) = replay_log_with_history_required(log_path)?;
@@ -403,21 +404,21 @@ struct Args {
     /// means missing history, not a fresh start.
     #[arg(long)]
     log_path: String,
-    /// Dry-run mode to see what pivots WOULD do, no funds moved or used.
-    #[arg(long, global = true, default_value_t = false)]
-    dry_run: bool,
-    /// debug mode to see what is going on behind the scenes.
-    #[arg(short = 'd', global = true, long, default_value_t = false)]
-    debug: bool,
     /// Which chain's data/{blockchain}.toml to load.
-    #[arg(long, global = true, default_value = "avalanche")]
-    blockchain: String,
+    #[arg(long, global = true, default_value = AVALANCHE)]
+    blockchain: Blockchain,
     /// Amount of BTC to open a new BTC->UNDEAD position with each cycle.
     #[arg(long, global = true, default_value_t = DEFAULT_BTC_TRADE_AMOUNT)]
     btc_trade_amount: f64,
     /// Amount of UNDEAD to open a new UNDEAD->BTC position with each cycle.
     #[arg(long, global = true, default_value_t = DEFAULT_UNDEAD_TRADE_AMOUNT)]
     undead_trade_amount: f64,
+    /// Dry-run mode to see what pivots WOULD do, no funds moved or used.
+    #[arg(long, global = true, default_value_t = false)]
+    dry_run: bool,
+    /// debug mode to see what is going on behind the scenes.
+    #[arg(short = 'd', global = true, long, default_value_t = false)]
+    debug: bool
 }
 
 #[derive(Debug, Subcommand)]
