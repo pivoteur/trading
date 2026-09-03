@@ -98,3 +98,11 @@ building `maegen`'s `yml` on your repo
 * Trigger it once by hand from the Actions tab 
 (`workflow_dispatch`, `dry_run: true` first) before letting the
 hourly `cron` take over.
+
+## 5. "Where is `tva`'s hisory?
+### A good error don't worry
+* This is a safey gaurd for `tva`; in other words,
+_YOU_ are to open the first two pivots for this program to work.
+* Please now move on to this final doc of how to manually build 
+a log for `tva` to run beautifully: 
+    * [source](manually-logging.md)
