@@ -94,7 +94,7 @@ jobs:
           path: trading/dapps/tva/target/release/tva
           key: >-
             tva-binary-
-            ${{ hashFiles(format('{0}/quiz01/a_tva/**/*.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles(format('{0}/quiz01/a_tva/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
