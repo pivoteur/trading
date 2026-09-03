@@ -21,34 +21,8 @@ use ethers::{
 };
 use serde::Deserialize;
 use libs::types::util::Id;
-//============================================================================
-//----- Token Registry --------------------------------------------------------
-//============================================================================
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub struct TokenEntry {
-    #[serde(default)]
-    pub native:   bool,
-    #[serde(default)]
-    pub address:  Option<String>,
-    pub decimals: u32,
-}
 
-pub type TokenRegistry = HashMap<String, TokenEntry>;
-
-/// Each binary embeds its own `tokens.toml` via `include_str!` (the token
-/// set differs per binary) and passes the raw string here to parse it.
-pub fn parse_token_registry(toml_str: &str) -> ErrStr<TokenRegistry> {
-    toml::from_str(toml_str).map_err(|e| format!("Failed to parse tokens.toml: {e}"))
-}
-
-pub fn token_entry<'a>(registry: &'a TokenRegistry, symbol: &str) -> ErrStr<&'a TokenEntry> {
-    match registry.get(symbol) {
-        Some(entry) => Ok(entry),
-        None => Err(format!(
-            "No tokens.toml entry for '{symbol}' — add one before checking this pool"
-        )),
-    }
-}
+use super::tokens::TokenRegistry;
 
 //============================================================================
 //----- Shared Trading Constants -----------------------------------------------
@@ -155,9 +129,9 @@ async fn native_coin_balance(wallet_address: &str) -> ErrStr<u128> {
 pub async fn wallet_balance(
     wallet_address: &str,
     symbol: &str,
-    registry: &TokenRegistry,
+    registry: &TokenRegistry
 ) -> ErrStr<f64> {
-    let entry = token_entry(registry, symbol)?;
+    let entry = registry.token(symbol)?;
     let raw = if entry.native {
         native_coin_balance(wallet_address).await?
     } else {
@@ -191,8 +165,8 @@ pub async fn query_swap(
     debug: bool
 ) -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
-    let from_entry = token_entry(registry, from_symbol)?;
-    let to_entry = token_entry(registry, to_symbol)?;
+    let from_entry = registry.token(from_symbol)?;
+    let to_entry = registry.token(to_symbol)?;
     let token_in = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?;
     let token_out = to_entry.address.as_deref().ok_or_else(|| format!("{to_symbol} missing address"))?;
     let amount_in_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
@@ -821,7 +795,7 @@ async fn send_tokens_raw(
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
 
-    let entry = token_entry(registry, symbol)?;
+    let entry = registry.token(symbol)?;
     let token_addr = entry.address.as_deref().ok_or_else(|| {
         format!("'{symbol}' has no address in tokens.toml (or is native — send_tokens_to_address only supports ERC-20 transfers)")
     })?;
@@ -1163,7 +1137,7 @@ pub async fn execute_trade(
         ));
     }
 
-    let from_entry = token_entry(registry, from_symbol)?;
+    let from_entry = registry.token(from_symbol)?;
     let from_addr = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?.to_string();
     let amount_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
 
