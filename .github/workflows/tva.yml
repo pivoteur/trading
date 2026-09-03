@@ -10,7 +10,7 @@ on:
       debug:
         description: 'Debug mode (verbose logging)?'
         type: boolean
-        default: false
+        default: true
       blockchain:
         description: 'Which chain (data/{blockchain}.toml) to trade against?'
         type: string
