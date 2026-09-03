@@ -386,6 +386,87 @@ pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str, p
     log_row(path, header, "MISFIRE", None, None, None, prim, proper, prim_amount, proper_amount, None, None, None, 0.0, tx_hash, snap, cum);
 }
 
+//----- Misfire Reporting ------------------------------------------------------
+
+/// Which half of a cycle a misfire happened in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MisfireStage {
+    Open,
+    Close,
+}
+
+impl MisfireStage {
+    fn label(self) -> &'static str {
+        match self {
+            MisfireStage::Open => "OPEN",
+            MisfireStage::Close => "CLOSE",
+        }
+    }
+}
+
+/// Guesses a misfire's likely cause from the error text, loose substring match.
+fn classify_misfire(err: &str) -> (&'static str, &'static str) {
+    let e = err.to_lowercase();
+    if e.contains("quote moved below your floor") {
+        (
+            "price moved between quoting and execution, past slippage tolerance",
+            "no funds moved. If this repeats on this pair, slippage tolerance may be too tight.",
+        )
+    } else if e.contains("could not decrypt keystore") {
+        (
+            "keystore could not be decrypted with the password given",
+            "check the keystore path and password secret match this wallet.",
+        )
+    } else if e.contains("does not match expected address") {
+        (
+            "keystore decrypted fine but belongs to a different wallet",
+            "check the keystore wired into this run is really this instance's own.",
+        )
+    } else if e.contains("reverted on-chain") {
+        (
+            "transaction was accepted but reverted on execution",
+            "check the tx hash on snowtrace.io -- usually a stale route or allowance mismatch.",
+        )
+    } else if e.contains("dropped or replaced") {
+        (
+            "transaction never confirmed -- dropped or replaced",
+            "no funds spent; usually a gas-price race. Safe to let the next cycle retry.",
+        )
+    } else if e.contains("kyberswap") || e.contains("routesummary") || e.contains("router") {
+        (
+            "the KyberSwap quote/build request itself failed",
+            "usually transient. If it repeats every cycle, check KyberSwap's API status.",
+        )
+    } else if e.contains("rpc") {
+        (
+            "the Avalanche RPC endpoint didn't answer cleanly",
+            "usually transient. If it repeats every cycle, the RPC endpoint may be degraded.",
+        )
+    } else if e.contains("no tokens.toml entry") || e.contains("missing address") {
+        (
+            "a token this trade needed isn't registered correctly in tokens.toml",
+            "check the token's entry in tokens.toml -- a config problem, will fail every cycle.",
+        )
+    } else {
+        (
+            "not a recognized failure shape -- see the raw error below",
+            "read the raw error text below.",
+        )
+    }
+}
+
+/// Prints a misfire to stdout with a likely cause, not just the raw error.
+pub fn report_misfire(stage: MisfireStage, pivot_id: Option<Id>, from: &str, to: &str, amount: f64, err: &str) {
+    let (why, how) = classify_misfire(err);
+    let pivot_label = pivot_id.map(|id| format!("pivot #{id}")).unwrap_or_else(|| "new position".to_string());
+
+    println!(
+        "  ! MISFIRE [{}] {pivot_label} {from}->{to} (attempted {amount:.8} {from}): {err}",
+        stage.label()
+    );
+    println!("      likely cause: {why} -- {how}");
+}
+
 pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats)> {
     if !Path::new(path).exists() {
         return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
@@ -1091,6 +1172,77 @@ mod unit_tests {
     fn test_resolve_wallet_address_errors_clearly_when_neither_is_set() {
         let result = resolve_wallet_address(None, "DEFINITELY_NOT_A_REAL_ENV_VAR_NAME_XYZ");
         assert!(result.is_err(), "with no CLI value and no env var set, this must be a clear error, not a silent empty address");
+    }
+
+    #[test]
+    fn test_misfire_stage_label() {
+        assert_eq!(MisfireStage::Open.label(), "OPEN");
+        assert_eq!(MisfireStage::Close.label(), "CLOSE");
+    }
+
+    #[test]
+    fn test_classify_misfire_quote_moved_below_floor() {
+        let (why, _how) = classify_misfire("Quote moved below your floor while unlocking the keystore (0.00490000 BTC quoted, but only 0.00485000 BTC is guaranteed at 50 bps slippage tolerance -- need > 0.00500000 BTC). That's not happening. No funds used.");
+        assert!(why.contains("price moved"), "expected floor-slippage classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_keystore_decrypt_failure() {
+        let (why, _how) = classify_misfire("Could not decrypt keystore, path /tmp/x.json: invalid password. No funds moved.");
+        assert!(why.contains("could not be decrypted"), "expected keystore classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_wrong_wallet_address() {
+        let (why, _how) = classify_misfire("Keystore address (0xabc) does not match expected address (0xdef) — refusing to proceed. No funds moved.");
+        assert!(why.contains("different wallet"), "expected address-mismatch classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_reverted_on_chain() {
+        let (why, _how) = classify_misfire("Swap transaction REVERTED on-chain. Hash: 0xabc123");
+        assert!(why.contains("reverted"), "expected revert classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_dropped_or_replaced() {
+        let (why, _how) = classify_misfire("Swap transaction was dropped or replaced. Hash: 0xabc123");
+        assert!(why.contains("dropped or replaced"), "expected drop/replace classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_kyberswap_failure() {
+        let (why, _how) = classify_misfire("KyberSwap route request failed: connection reset");
+        assert!(why.contains("KyberSwap"), "expected KyberSwap classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_rpc_failure() {
+        let (why, _how) = classify_misfire("RPC request (eth_call) failed: timed out");
+        assert!(why.contains("RPC"), "expected RPC classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_missing_token_entry() {
+        let (why, _how) = classify_misfire("No tokens.toml entry for 'FOO' — add one before checking this pool");
+        assert!(why.contains("tokens.toml"), "expected tokens.toml classification, got: '{why}'");
+    }
+
+    #[test]
+    fn test_classify_misfire_falls_back_on_unrecognized_error() {
+        let (why, how) = classify_misfire("something totally unexpected happened");
+        assert!(why.contains("not a recognized failure shape"), "expected fallback classification, got: '{why}'");
+        assert!(how.contains("raw error"), "expected fallback hint to point at the raw error, got: '{how}'");
+    }
+
+    #[test]
+    fn test_report_misfire_open_does_not_panic() {
+        report_misfire(MisfireStage::Open, None, "BTC", "UNDEAD", 0.005, "some error");
+    }
+
+    #[test]
+    fn test_report_misfire_close_does_not_panic() {
+        report_misfire(MisfireStage::Close, Some(12), "UNDEAD", "BTC", 500_000.0, "Swap transaction REVERTED on-chain. Hash: 0xdef");
     }
 }
 
