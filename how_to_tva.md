@@ -29,6 +29,16 @@ everywhere it appears.
   never signs as it. Run Part 1 Steps I–III for it too, but you only need the
   **address** out of it — skip exporting a keystore JSON/password for it,
   this workflow never asks for one.
+> The _two wallets_ are referring to:
+>
+> a wallet `tva` runs in and a _vault_ `maegen` will balance $UNDEAD with.
+> 
+> e.g.
+> 
+> 
+> `tva` - has its own _address_, _keystore_json_, and _keystore_password_
+> 
+> `maegen` - has its own _address_, _keystore_json_, and _keystore_password_
 
 ## 2. Set these in GitHub Secrets
 
@@ -72,7 +82,19 @@ See these files as a template `<your-repo>/.github/workflows/<instance>.yml`:
 
 ## 4. Run it
 
-Once the secrets/variables above are set and every `<...>` placeholder in the
-YML is replaced with your real values, trigger it once by hand from the
-Actions tab (`workflow_dispatch`, `dry_run: true` first) before letting the
+* Once the secrets/ variables above are set and everything within the
+YML is replaced with your real values, make sure your log file is 
+created before running the program. 
+* Make sure you include a _checkout_ step for your repo when
+building `maegen`'s `yml` on your repo
+* Within the _checkout_ for `maegen` include:
+```ymal
+- name: Checkout trading
+        uses: actions/checkout@v4
+        with:
+          repository: pivoteur/trading
+          path: trading
+```
+* Trigger it once by hand from the Actions tab 
+(`workflow_dispatch`, `dry_run: true` first) before letting the
 hourly `cron` take over.
