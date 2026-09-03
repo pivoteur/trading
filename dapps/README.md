@@ -50,5 +50,9 @@ Verify all dependencies are set by running these commands:
  * `cat ~/.foundry/keystores/<name>` to confirm and produce the JSON blob you need as one of the secrets. This the second secret for GitHub.
  * The "_Enter password_" you set is the third secret for GitHub.
 ## Step IV
- * Add these three dependencies to your GitHub's repository secrets.
+ * Add these three dependencies to your GitHub's repository secrets; 
+   * e.g. : WALLET_ADDRESS="0x696969..." 
+   * e.g. : KEYSTORE_JSON
+   * e.g. : KEYSTORE_PASSWORD
  * export the `wallet address` and the `~/.foundry/keystores/<name>` path, locally within `~/.bashrc`
+   * So that, you can run these dapps locally, if you want.
