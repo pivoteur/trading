@@ -76,7 +76,7 @@ jobs:
         # hourly scheduled run resolve to identical values.
         run: |
           echo "DRY_RUN=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_ENV
-          echo "DEBUG=${{ github.event.inputs.debug || 'false' }}" >> $GITHUB_ENV
+          echo "DEBUG=${{ github.event.inputs.debug || 'true' }}" >> $GITHUB_ENV
           echo "BLOCKCHAIN=${{ github.event.inputs.blockchain || 'avalanche' }}" >> $GITHUB_ENV
           echo "BTC_TRADE_AMOUNT=${{ github.event.inputs.btc_trade_amount || '0.005' }}" >> $GITHUB_ENV
           echo "UNDEAD_TRADE_AMOUNT=${{ github.event.inputs.undead_trade_amount || '500000' }}" >> $GITHUB_ENV
