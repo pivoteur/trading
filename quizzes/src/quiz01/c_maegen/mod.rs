@@ -1,47 +1,41 @@
 use std::collections::HashMap;
 use clap::Parser;
 use book::{
-        cli_utils::generate_banner,
-        debug,
-        err_utils::ErrStr,
-        file_utils::read_file,
-        parse_args_add_banner,
-        string_utils::{UppercaseString, s},
-    };
-use trading::auto_trading::{
-                TokenRegistry,
-                parse_token_registry,
-                wallet_balance,
-                query_swap,
-                attempt_trade_with_actual_amount,
-                AttemptOutcome,
-                NO_REAL_FLOOR,
-                UNDEAD,
-                now_ts,
-                log_ts,
-                append_trade_log_line,
+   debug,
+   parse_args_add_banner,
+   cli_utils::generate_banner,
+   err_utils::ErrStr,
+   file_utils::read_file,
+   string_utils::{UppercaseString, s},
 };
-
+use libs::types::blockchains::Blockchain;
+use trading::{
+   auto_trading::{
+      wallet_balance,
+      query_swap,
+      attempt_trade_with_actual_amount,
+      AttemptOutcome,
+      NO_REAL_FLOOR,
+      UNDEAD,
+      now_ts,
+      log_ts,
+      append_trade_log_line
+   },
+   tokens::{ TokenRegistry, load_tokens }
+};
 
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const DUST_EPSILON: f64 = 1e-8;
-const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
 const TRADE_LOG_HEADER: &str = "timestamp\tmode\ttoken\tundead_balance\ttoken_balance\ttoken_value_in_undead\tswap_undead\toutcome\tactual_received\tgas_avax\ttx_hash";
 
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
-fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
-    move |k| h.get(k).cloned().unwrap_or_else(|| k.to_string())
-}
 //=========================================================================================
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
 #[derive(Debug, Parser)]
 #[command(version = "1.1.0")]
 struct Args {
-    blockchain: String,
+    blockchain: Blockchain,
     /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
     token: UppercaseString,
     /// defaults to the vault -- override to run against any
@@ -89,18 +83,12 @@ fn compute_swap_amount(undead_balance: f64, token_value_in_undead: f64) -> f64 {
 }
 //=====
 #[allow(clippy::too_many_arguments)]
-async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str, keystore_path: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let blockchains: HashMap<String, String> =
-        [("binance", "bsc")].into_iter().map(|(a, b)| (s(a), s(b))).collect();
-    let block = lookup(&blockchains);
-    let chain = block(blockchain);
-
+async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault_address: &str, keystore_path: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
     debug!("runoff_continuation", debug);
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
     println!("mode {mode} token {token}");
 
-    let tokens = read_file(&format!("{DATA_DIR}/{chain}.toml"))?;
-    let registry = load_token_registry(&tokens)?;
+    let registry = load_tokens(blockchain)?;
 
     let (undead_balance, token_balance) = tokio::try_join!(
         wallet_balance(vault_address, UNDEAD, &registry),
@@ -120,7 +108,7 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
         return Ok(());
     }
 
-    let reference_quote = query_swap(&chain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
+    let reference_quote = query_swap(blockchain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
     println!("{reference_amount:.8} UNDEAD (half balance) quotes to {reference_quote:.8} {token}");
     if reference_quote <= DUST_EPSILON {
         return Err(format!("KyberSwap quoted ~0 {token} for {reference_amount:.8} UNDEAD -- no route/liquidity right now."));
@@ -141,7 +129,7 @@ async fn runoff_continuation(blockchain: &str, token: &str, vault_address: &str,
     println!("  swapping {swap_amount:.8} UNDEAD -> {token}");
 
     match attempt_trade_with_actual_amount(
-        &chain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, keystore_path, dry_run, debug,
+        blockchain, vault_address, &registry, UNDEAD, token, swap_amount, NO_REAL_FLOOR, slippage_bps, keystore_path, dry_run, debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  SWAPPED  {swap_amount:.8} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
@@ -177,6 +165,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 mod unit_tests {
     use super::*;
 
+   const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
     #[test]
     fn test_load_token_registry_has_btc_undead_avax() -> ErrStr<()> {
@@ -226,6 +215,7 @@ pub mod functional_tests {
     use book::{ create_testing, utils::now };
     use std::println;
 
+   const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
     create_testing!("quiz01::c_maegen");
 

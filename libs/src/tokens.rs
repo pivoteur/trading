@@ -29,7 +29,7 @@ pub struct TokenRegistry {
    tokens: HashMap<String, TokenEntry>
 }
 
-pub async fn load_tokens(blockchain: Blockchain) -> ErrStr<TokenRegistry> {
+pub async fn load_tokens(blockchain: &Blockchain) -> ErrStr<TokenRegistry> {
    let url = token_url(blockchain);
    let raw = read_rest(&url).await?;
    parse_token_registry(&raw)
@@ -83,12 +83,12 @@ mod functional_tests {
    create_testing!("libs::tokens");
 
    run!("load_tokens_avalanche", {
-      let toks = now(load_tokens(AVALANCHE))?;
+      let toks = now(load_tokens(&AVALANCHE))?;
       print_csv(&toks);
    });
 
    run!("load_tokens_binance", {
-      let toks = now(load_tokens(BINANCE))?;
+      let toks = now(load_tokens(&BINANCE))?;
       print_csv(&toks);
    });
 }
@@ -100,19 +100,19 @@ mod tests {
    use libs::types::blockchains::Blockchain::*;
 
    #[tokio::test] async fn test_load_tokens_avax_native() -> ErrStr<()> {
-      let toks = load_tokens(AVALANCHE).await?;
+      let toks = load_tokens(&AVALANCHE).await?;
       assert!(toks.token("avax")?.native);
       Ok(())
    }
 
    #[tokio::test] async fn test_load_tokens_binance_native() -> ErrStr<()> {
-      let toks = load_tokens(BINANCE).await?;
+      let toks = load_tokens(&BINANCE).await?;
       assert!(toks.token("bnb")?.native);
       Ok(())
    }
 
    #[tokio::test] async fn test_btc_has_addy() -> ErrStr<()> {
-      let toks = load_tokens(AVALANCHE).await?;
+      let toks = load_tokens(&AVALANCHE).await?;
       let btc_mb_addy = toks.token("btc")?.address;
       assert!(btc_mb_addy.is_some());
       btc_mb_addy.and_then(|btc_addy| {

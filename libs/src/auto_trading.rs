@@ -1,34 +1,39 @@
-use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::Path;
-use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+   collections::HashMap,
+   fs::OpenOptions,
+   io::Write,
+   path::Path,
+   str::FromStr,
+   time::{Duration, SystemTime, UNIX_EPOCH}
+};
 use chrono::{DateTime, Utc};
 use book::{
     debug,
-        err_utils::ErrStr,
-        file_utils::lines_from_file,
-        string_utils::s,
+    err_utils::ErrStr,
+    file_utils::lines_from_file,
+    string_utils::s
 };
 use ethers::{
-        middleware::SignerMiddleware,
-        providers::{Http, Middleware, Provider},
-        signers::{LocalWallet, Signer},
-        types::{
-            transaction::eip2718::TypedTransaction, Address, Bytes, Eip1559TransactionRequest, U256,
-        },
+   middleware::SignerMiddleware,
+   providers::{Http, Middleware, Provider},
+   signers::{LocalWallet, Signer},
+   types::{
+      transaction::eip2718::TypedTransaction,
+      Address, Bytes, Eip1559TransactionRequest, U256
+   },
 };
 use serde::Deserialize;
-use libs::types::util::Id;
+use libs::types::{ blockchains:: Blockchain, util::Id };
 
-use super::tokens::TokenRegistry;
+use super::tokens::{ TokenRegistry, TokenEntry };
 
 //============================================================================
 //----- Shared Trading Constants -----------------------------------------------
 //============================================================================
+
 pub const UNDEAD: &str = "UNDEAD";
 pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
+
 //============================================================================
 //----- Shared HTTP Client ----------------------------------------------------
 //============================================================================
@@ -39,28 +44,13 @@ fn http_client() -> ErrStr<reqwest::Client> {
         .build()
         .map_err(|e| format!("Could not build HTTP client: {e}"))
 }
+
 //============================================================================
 //----- Wallet Balance Check --------------------------------------------------
 //============================================================================
+
 pub const AVALANCHE_RPC: &str = "https://api.avax.network/ext/bc/C/rpc";
 pub const AVALANCHE_CHAIN_ID: u64 = 43114;
-
-pub fn wallet_address_from_env(var_name: &str) -> ErrStr<String> {
-    std::env::var(var_name).map_err(|_| {
-        let ans = format!("Missing required env var: {var_name} (your public wallet address)");
-        ans
-    })
-}
-
-/// Resolves a wallet address at the CLI boundary: `cli_value` wins if given,
-/// otherwise falls back to `wallet_address_from_env(env_var)`. Call this from
-/// your binary's CLI entrypoint only, never from inside a cycle-running fn.
-pub fn resolve_wallet_address(cli_value: Option<String>, env_var: &str) -> ErrStr<String> {
-    match cli_value {
-        Some(addr) => Ok(addr),
-        None => wallet_address_from_env(env_var),
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct RpcResponse {
@@ -147,6 +137,7 @@ pub async fn wallet_balance(
 //============================================================================
 //----- Live KyberSwap Quote --------------------------------------------------
 //============================================================================
+
 /// A live quote plus everything needed to actually build and sign the swap
 /// afterward.
 #[derive(Debug)]
@@ -156,24 +147,29 @@ pub struct KyberSwap {
     pub router_address:     String,
 }
 
-pub async fn query_swap(
-    blockchain: &str,
-    registry: &TokenRegistry,
-    from_symbol: &str,
-    to_symbol: &str,
-    amount: f64,
-    debug: bool
-) -> ErrStr<KyberSwap> {
+fn api_url(blockchain: &Blockchain) -> String {
+    let base_url = "https://aggregator-api.kyberswap.com";
+    format!("{base_url}/{}/api/v1", blockchain.blockchain())
+}
+
+pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
+                        from_symbol: &str, to_symbol: &str, amount: f64,
+                        debug: bool) -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
     let from_entry = registry.token(from_symbol)?;
     let to_entry = registry.token(to_symbol)?;
-    let token_in = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?;
-    let token_out = to_entry.address.as_deref().ok_or_else(|| format!("{to_symbol} missing address"))?;
-    let amount_in_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
+    fn addy(tok: &str, entry: &TokenEntry) -> ErrStr<String> {
+       entry.address.clone().ok_or(format!("No address for token {tok}"))
+    }
+    let token_in = addy(from_symbol, &from_entry)?;
+    let token_out = addy(to_symbol, &to_entry)?;
+    let amount_in_base =
+       (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
 
-    let url = format!(
-        "https://aggregator-api.kyberswap.com/{blockchain}/api/v1/routes?tokenIn={token_in}&tokenOut={token_out}&amountIn={amount_in_base}"
-    );
+    fn tok(dir: &str, token: &str) -> String { format!("token{dir}={token}") }
+    let url = format!("{}/routes?{}&{}&amountIn={}", api_url(blockchain),
+                      tok("In", &token_in), tok("Out", &token_out),
+                      amount_in_base);
 
     log!("I am calling kyber...");
     let resp = http_client()?
@@ -211,7 +207,7 @@ pub async fn query_swap(
     let amount_out_str = route_summary_raw
         .get("amountOut")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("routeSummary missing amountOut. Raw: {raw_body}"))?;
+        .ok_or(format!("routeSummary missing amountOut. Raw: {raw_body}"))?;
     let raw: u128 = amount_out_str
         .parse()
         .map_err(|_| format!("Could not parse amountOut '{amount_out_str}'"))?;
@@ -595,7 +591,7 @@ fn slippage_adjusted_floor(min_floor: f64, slippage_bps: u16) -> f64 {
 /// through, regardless of which binary is calling it.
 #[allow(clippy::too_many_arguments)]
 pub async fn attempt_trade_with_actual_amount(
-    blockchain: &str,
+    blockchain: &Blockchain,
     wallet_address: &str,
     registry: &TokenRegistry,
     from_symbol: &str,
@@ -765,7 +761,7 @@ pub async fn approve_exact_amount(
 /// so it stays silent by default. `slippage_bps` is basis points (e.g.
 /// 50 = 0.50%).
 pub async fn kyberswap_build(
-    blockchain: &str,
+    blockchain: &Blockchain,
     route_summary_raw: &serde_json::Value,
     sender: &str,
     slippage_bps: u16,
@@ -779,7 +775,7 @@ pub async fn kyberswap_build(
     });
 
     let resp = http_client()?
-        .post(format!("https://aggregator-api.kyberswap.com/{blockchain}/api/v1/route/build"))
+        .post(format!("{}/route/build", api_url(blockchain)))
         .header("X-Client-Id", "pivoteur-autotrader")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .header("Content-Type", "application/json")
@@ -951,31 +947,32 @@ mod unit_tests {
     use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
-      let tokens = load_tokens(AVALANCHE).await?;
-      let query = query_swap("avalanche", &tokens, "BTC", "ETH", 1.0, true).await;
+      let blockchain = &AVALANCHE;
+      let tokens = load_tokens(blockchain).await?;
+      let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await;
       assert!(query.is_ok());
       Ok(())
    }
 
    #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
-      let tokens = load_tokens(AVALANCHE).await?;
-      let query = query_swap("avalanche", &tokens, "BTC", "ETH", 1.0, true).await?;
+      let blockchain = &AVALANCHE;
+      let tokens = load_tokens(blockchain).await?;
+      let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await?;
       let ratio = query.amount_out;
       assert!(ratio > 16.0, "The ratio BTC/ETH is {ratio}");
       Ok(())
    }
 
-    #[test]
-    fn test_hex_to_u128_parses_rpc_style_hex() -> ErrStr<()> {
+    #[test] fn test_hex_to_u128_parses_rpc_style_hex() -> ErrStr<()> {
         assert_eq!(hex_to_u128("0x0")?, 0);
         assert_eq!(hex_to_u128("0x")?, 0);
         assert_eq!(hex_to_u128("0xff")?, 255);
-        assert_eq!(hex_to_u128("0xde0b6b3a7640000")?, 1_000_000_000_000_000_000);
+        assert_eq!(hex_to_u128("0xde0b6b3a7640000")?,
+                   1_000_000_000_000_000_000);
         Ok(())
     }
 
-    #[test]
-    fn test_hex_to_u128_rejects_garbage() {
+    #[test] fn test_hex_to_u128_rejects_garbage() {
         assert!(hex_to_u128("0xnotarealnumber").is_err());
     }
 
@@ -1160,27 +1157,6 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_resolve_wallet_address_prefers_cli_value_and_never_touches_env() {
-        let resolved = resolve_wallet_address(
-            Some("0xCLI0000000000000000000000000000000000".to_string()),
-            "DEFINITELY_NOT_A_REAL_ENV_VAR_NAME_XYZ",
-        );
-        assert_eq!(resolved.unwrap(), "0xCLI0000000000000000000000000000000000");
-    }
-
-    #[test]
-    fn test_resolve_wallet_address_errors_clearly_when_neither_is_set() {
-        let result = resolve_wallet_address(None, "DEFINITELY_NOT_A_REAL_ENV_VAR_NAME_XYZ");
-        assert!(result.is_err(), "with no CLI value and no env var set, this must be a clear error, not a silent empty address");
-    }
-
-    #[test]
-    fn test_misfire_stage_label() {
-        assert_eq!(MisfireStage::Open.label(), "OPEN");
-        assert_eq!(MisfireStage::Close.label(), "CLOSE");
-    }
-
-    #[test]
     fn test_classify_misfire_quote_moved_below_floor() {
         let (why, _how) = classify_misfire("Quote moved below your floor while unlocking the keystore (0.00490000 BTC quoted, but only 0.00485000 BTC is guaranteed at 50 bps slippage tolerance -- need > 0.00500000 BTC). That's not happening. No funds used.");
         assert!(why.contains("price moved"), "expected floor-slippage classification, got: '{why}'");
@@ -1247,7 +1223,7 @@ mod unit_tests {
 }
 
 pub async fn execute_trade(
-    blockchain: &str,
+    blockchain: &Blockchain,
     wallet_address: &str,
     registry: &TokenRegistry,
     from_symbol: &str,

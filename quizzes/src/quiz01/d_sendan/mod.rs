@@ -1,35 +1,30 @@
 use clap::Parser;
 use book::{
-        debug,
-        err_utils::ErrStr,
-        file_utils::read_file,
-        parse_args_add_banner,
-        string_utils::UppercaseString,
-        cli_utils::generate_banner,
-    };
-use trading::auto_trading::{
-                TokenRegistry,
-                parse_token_registry,
-                token_entry,
-                wallet_balance,
-                send_tokens_to_address,
-                now_ts,
-                log_ts,
-                append_trade_log_line,
+   debug,
+   parse_args_add_banner,
+   err_utils::ErrStr,
+   file_utils::read_file,
+   string_utils::UppercaseString,
+   cli_utils::generate_banner,
 };
-
+use libs::types::blockchains::Blockchain;
+use trading::{
+   auto_trading::{
+      wallet_balance,
+      send_tokens_to_address,
+      now_ts,
+      log_ts,
+      append_trade_log_line
+   },
+   tokens::{ TokenRegistry, load_tokens }
+};
 
 //============================================================================
 // ----- const ----------------------------------------------------------------
 //============================================================================
 const DUST_EPSILON: f64 = 1e-8;
-const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/sendan-sends.log");
 const TRADE_LOG_HEADER: &str = "timestamp\tmode\tblockchain\ttoken\tamount\tto_address\toutcome\tactual_sent\tgas_avax\ttx_hash";
-
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
 
 /// `0x` followed by exactly 40 hex characters -- no checksum validation,
 /// just enough of a shape check to catch a fat-fingered or truncated
@@ -52,7 +47,7 @@ fn is_valid_evm_address(address: &str) -> bool {
 #[command(name = "sendan", version = "1.0.1")]
 struct Args {
     /// Blockchain to send on; must match a `data/<blockchain>.toml` file. e.g. `avalanche`
-    blockchain: String,
+    blockchain: Blockchain,
     /// Amount of `token` to send, in human units (not wei/base units). e.g. `1100`
     amount: f64,
     /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -90,7 +85,7 @@ fn log_send(
 //========================================================================================
 #[allow(clippy::too_many_arguments)]
 async fn sendan_continuation(
-    blockchain: &str, amount: f64, token: &str, to_address: &str,
+    blockchain: &Blockchain, amount: f64, token: &str, to_address: &str,
     wallet_address: &str, keystore_path: &str, dry_run: bool, debug: bool,
 ) -> ErrStr<()> {
     debug!("sendan_continuation", debug);
@@ -106,8 +101,7 @@ async fn sendan_continuation(
         ));
     }
 
-    let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
-    let registry = load_token_registry(&tokens)?;
+    let registry = load_tokens(&blockchain)?;
 
     // fail fast on an unknown/native token before spending an RPC call on
     // a balance check we already know can't lead anywhere.
@@ -165,11 +159,11 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 mod unit_tests {
     use super::*;
     use book::utils::now;
+    use libs::types::blockchains::Blockchain::AVALANCHE;
 
     #[test]
     fn test_load_token_registry_has_undead_avax() -> ErrStr<()> {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         for symbol in ["UNDEAD", "AVAX"] {
             assert!(registry.contains_key(symbol), "missing '{symbol}' in tokens.toml");
         }
@@ -217,18 +211,16 @@ mod unit_tests {
 //============================================================================================
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
-pub mod functional_tests {
+mod functional_tests {
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::now };
-    use std::println;
-
+    use libs::types::blockchains::Blockchain::AVALANCHE;
 
     create_testing!("quiz01::d_sendan");
 
     run!("wallet_balance_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         let balance = now(wallet_balance(
             "0x123",
             "UNDEAD",
@@ -246,8 +238,7 @@ pub mod functional_tests {
     });
 
     run!("sendan_functionality", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         let balance = now(wallet_balance("0x123", "UNDEAD", &registry))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
         if balance <= DUST_EPSILON {

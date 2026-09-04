@@ -2,10 +2,11 @@ use std::eprintln;
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
-        cli_utils::generate_banner,
-        err_utils::ErrStr,
-        file_utils::read_file,
-        parse_args_add_banner,
+   cli_utils::generate_banner,
+   err_utils::ErrStr,
+   file_utils::read_file,
+   parse_args_add_banner,
+   string_utils::s
 };
 use libs::types::{
    blockchains::{ Blockchain, Blockchain::AVALANCHE },
@@ -13,31 +14,27 @@ use libs::types::{
 };
 use trading::{
    auto_trading::{
-            resolve_wallet_address,
-            send_tokens_to_address,
-            wallet_balance,
-            OpenPivot,
-            CumulativeStats,
-            BalanceSnapshot,
-            balance_snapshot,
-            AttemptOutcome,
-            attempt_trade_with_actual_amount,
-            biggest_first,
-            now_ts,
-            replay_log,
-            log_open,
-            log_close,
-            log_misfire,
-            report_misfire,
-            MisfireStage,
-            UNDEAD,
-            NO_REAL_FLOOR
+      send_tokens_to_address,
+      wallet_balance,
+      OpenPivot,
+      CumulativeStats,
+      BalanceSnapshot,
+      balance_snapshot,
+      AttemptOutcome,
+      attempt_trade_with_actual_amount,
+      biggest_first,
+      now_ts,
+      replay_log,
+      log_open,
+      log_close,
+      log_misfire,
+      report_misfire,
+      MisfireStage,
+      UNDEAD,
+      NO_REAL_FLOOR
    },
-   tokens::{ load_tokens }
+   tokens::{ TokenRegistry, load_tokens }
 };
-
-//----- Token Registry --------------------------------------------------------
-// const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 
 //----- Fixed Trade Sizes ------------------------------------------------------
 // tvá trades exactly one pair, BTC<->UNDEAD (unlike arbitrage, which
@@ -47,11 +44,13 @@ const DEFAULT_UNDEAD_TRADE_AMOUNT: f64 = 500_000.0;
 const DEFAULT_BTC_TRADE_AMOUNT: f64 = 0.005;
 const SLIPPAGE_BPS: u16 = 0; // 0%
 const DEFAULT_DIV_PCT: f64 = 25.0;
+
 //----- Reporting -----------------------------------------------------------
 // What tvá's wallet actually started with, for the daily report's "started
 // with..." line -- historical, not derived from the log.
 const STARTING_UNDEAD_CAPITAL: f64 = 5_000_000.0;
 const STARTING_BTC_CAPITAL: f64 = 0.05;
+
 //----- Trade Log — human-readable timestamps -----------------------------------
 // Log path is a required runtime argument (--log-path), not a compile-time
 // const -- so a real run and a functional test can point at different logs
@@ -80,15 +79,22 @@ fn replay_log_with_history_required(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, I
 // instead of being threaded through every helper fn as its own parameter --
 // this is what gets `open_trade`/`pivot_survey` under clippy's
 // too-many-arguments threshold honestly, instead of just `#[allow(...)]`.
-struct CycleCtx<'a> {
-    wallet_address: &'a str,
-    vault_address: &'a str,
-    keystore_path: &'a str,
-    log_path: &'a str,
-    blockchain: &'a str,
-    registry: &'a TokenRegistry,
+struct CycleCtx {
+    wallet_address: String,
+    vault_address: String,
+    keystore_path: String,
+    log_path: String,
+    blockchain: Blockchain,
+    registry: TokenRegistry,
     dry_run: bool,
     debug: bool,
+}
+fn mk_cycle_ctx(addy: &str, vault: &str, store: &str, log: &str,
+                block: &Blockchain, reg: &TokenRegistry, dry: bool, debug: bool)
+      -> CycleCtx {
+   CycleCtx { wallet_address: s(addy), vault_address: s(vault),
+              keystore_path: s(store), blockchain: block.clone(),
+              registry: reg.clone(), dry_run: dry, debug }
 }
 
 /// The running totals that accumulate across one cycle's survey-then-open
@@ -118,10 +124,10 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
 // env in here -- only `runoff_with_args` (the CLI entrypoint) does that,
 // via `resolve_wallet_address`. See the `Args` struct below.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &str, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
-    let registry = load_tokens(&tokens)?;
-    let ctx = CycleCtx { wallet_address, vault_address, keystore_path, log_path, blockchain, registry: &registry, dry_run, debug };
+pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &Blockchain, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+    let registry = load_tokens(blockchain)?;
+    let ctx = mk_cycle_ctx(wallet_address, vault_address, keystore_path,
+                   log_path, blockchain, &registry, dry_run, debug);
 
     let (open_pivots0, next_pivot_id, next_close_id, opening_stats) = replay_log_with_history_required(log_path)?;
     let open_pivots = biggest_first(open_pivots0);
@@ -176,7 +182,7 @@ pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path:
 /// Daily-cadence status report -- a raw closes/opens tally doesn't say
 /// whether the program is doing well, so this reads as a running scoreboard
 /// against tvá's actual starting capital instead.
-async fn assesment_report(ctx: &CycleCtx<'_>, opened_something: bool, running_stats: CumulativeStats, skipped_open_reasons: &[String]) {
+async fn assesment_report(ctx: &CycleCtx, opened_something: bool, running_stats: CumulativeStats, skipped_open_reasons: &[String]) {
     if !opened_something {
         println!("  Nothing to open this cycle ({}) — see ya in an hour!", skipped_open_reasons.join("; "));
     }
@@ -221,7 +227,7 @@ fn amount_decimals(token: &str) -> usize {
 /// direction and which committed total gets credited differ. Never
 /// propagates an error -- one bad leg can't cancel the other leg or the
 /// cycle's summary report.
-async fn open_trade(ctx: &CycleCtx<'_>, state: &mut CycleState, snap: &mut BalanceSnapshot, report: &mut OpenReport, from: &str, to: &str, amount: f64) {
+async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSnapshot, report: &mut OpenReport, from: &str, to: &str, amount: f64) {
     let available = if from == BTC { snap.asset_available } else { snap.undead_available };
 
     if available <= amount {
@@ -267,7 +273,7 @@ async fn open_trade(ctx: &CycleCtx<'_>, state: &mut CycleState, snap: &mut Balan
 /// Surveys one pivot for a possible close. Never propagates an error, same
 /// as `open_trade` -- one bad pivot can't cancel the rest of the survey or
 /// the open-new-position step that follows it.
-async fn pivot_survey(ctx: &CycleCtx<'_>, state: &mut CycleState, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
+async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
     let prim_dp = amount_decimals(&pivot.prim);
     let proper_dp = amount_decimals(&pivot.proper);
 
@@ -366,7 +372,7 @@ fn compute_div_amount(pct: f64, gain: f64) -> f64 { pct / 100.0 * gain }
 // ever calls this from the `Executed` arm (dry_run proven false) or the
 // `DryRunWouldClear` arm (dry_run proven true), so a separate bool here
 // would just be a redundant copy of a value the caller already has.
-async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) -> ErrStr<()> {
+async fn divvy_to_vault(ctx: &CycleCtx, token: &str, gain: f64, pct: f64) -> ErrStr<()> {
     let mode_tag = if ctx.dry_run { " [DRY RUN]" } else { "" };
     let amount = compute_div_amount(pct, gain);
 
@@ -392,12 +398,10 @@ async fn divvy_to_vault(ctx: &CycleCtx<'_>, token: &str, gain: f64, pct: f64) ->
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
-    /// CLI override; falls back to TVA_WALLET_ADDRESS via `resolve_wallet_address`.
-    #[arg(long)]
-    wallet_address: Option<String>,
-    /// CLI override; falls back to VAULT_ADDRESS via `resolve_wallet_address`.
-    #[arg(long)]
-    vault_address: Option<String>,
+    #[arg(long, env="TVA_WALLET_ADDRESS")]
+    wallet_address: String,
+    #[arg(long, env="VAULT_ADDRESS")]
+    vault_address: String,
     /// `global = true` lets this be given either before or after the
     /// subcommand — `tva --dry-run div` and `tva div --dry-run` both work.
     #[arg(long, env = "TVA_KEYSTORE_PATH")]
@@ -407,7 +411,7 @@ struct Args {
     #[arg(long)]
     log_path: String,
     /// Which chain's data/{blockchain}.toml to load.
-    #[arg(long, global = true, default_value = AVALANCHE)]
+    #[arg(long, global = true, default_value_t = AVALANCHE)]
     blockchain: Blockchain,
     /// Amount of BTC to open a new BTC->UNDEAD position with each cycle.
     #[arg(long, global = true, default_value_t = DEFAULT_BTC_TRADE_AMOUNT)]
@@ -438,9 +442,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
         None => 0.0,
         Some(Command::Div { pct }) => pct,
     };
-    let wallet_address = resolve_wallet_address(args.wallet_address, "TVA_WALLET_ADDRESS")?;
-    let vault_address = resolve_wallet_address(args.vault_address, "VAULT_ADDRESS")?;
-    run_cycle(&wallet_address, &vault_address, &args.keystore_path, &args.log_path, &args.blockchain, args.btc_trade_amount, args.undead_trade_amount, pct, args.dry_run, args.debug).await
+    run_cycle(&args.wallet_address, &args.vault_address, &args.keystore_path, &args.log_path, &args.blockchain, args.btc_trade_amount, args.undead_trade_amount, pct, args.dry_run, args.debug).await
 }
 
 //----- UNIT TESTS -------------------------------------------------------------
@@ -450,8 +452,7 @@ mod unit_tests {
 
     #[test]
     fn test_load_token_registry_has_btc_undead_avax() -> ErrStr<()> {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         for symbol in ["BTC", "UNDEAD", "AVAX"] {
             assert!(registry.contains_key(symbol), "missing '{symbol}' in avalanche.toml");
         }
@@ -576,8 +577,7 @@ pub mod functional_tests {
     create_testing!("quiz01::a_tva");
 
     run!("wallet_balance_btc", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         let balance = now(wallet_balance(
             TEST_MANDI_ADDRESS,
             "BTC",
@@ -587,8 +587,7 @@ pub mod functional_tests {
     });
 
     run!("wallet_balance_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         let balance = now(wallet_balance(
             TEST_MANDI_ADDRESS,
             "UNDEAD",
@@ -598,8 +597,7 @@ pub mod functional_tests {
     });
 
     run!("wallet_balance_avax_native_coin_branch", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
+        let registry = load_tokens(&AVALANCHE)?;
         let balance = now(wallet_balance(
             TEST_MANDI_ADDRESS,
             "AVAX",
@@ -609,16 +607,14 @@ pub mod functional_tests {
     });
 
     run!("live_quote_undead_to_btc", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(query_swap("avalanche", &registry, "UNDEAD", "BTC", 500_000.0, true))?;
+        let registry = load_tokens(&AVALANCHE)?;
+        let swap = now(query_swap(&AVALANCHE, &registry, "UNDEAD", "BTC", 500_000.0, true))?;
         println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
     });
 
     run!("live_quote_btc_to_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let swap = now(query_swap("avalanche", &registry, "BTC", "UNDEAD", 0.005, true))?;
+        let registry = load_tokens(&AVALANCHE)?;
+        let swap = now(query_swap(&AVALANCHE, &registry, "BTC", "UNDEAD", 0.005, true))?;
         println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
     });
 

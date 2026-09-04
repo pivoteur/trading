@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use trading::auto_trading::{
-    attempt_trade_with_actual_amount,
-    TokenRegistry,
-    parse_token_registry,
+use trading::{
+   auto_trading::attempt_trade_with_actual_amount,
+   tokens::{ TokenRegistry, load_tokens }
 };
 use book::{
    parse_args_add_banner,
@@ -12,15 +11,9 @@ use book::{
    utils::get_env,
    file_utils::read_file
 };
+use libs::types::blockchains::Blockchain;
 use clap::Parser;
 
-
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
-fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
-    move |k| h.get(k).cloned().unwrap_or_else(|| k.to_string())
-}
 //=========================================================================================
 // ----- CLI --------------------------------------------------------------------------------
 //=========================================================================================
@@ -28,36 +21,33 @@ fn lookup(h: &HashMap<String, String>) -> impl Fn(&str) -> String + '_ {
 #[command(name = "ceap")]
 #[command(version = "0.1.1")]
 struct Args {
-    blockchain: String,
+    /// trading from this token
     from_token: UppercaseString,
+    /// amount of `from_token` to trade
     amount: f64,
+    /// trading to this token
     to_token: UppercaseString,
     /// Minimum acceptable output amount. Required when --live is set.
     #[arg(long)]
     floor: Option<f64>,
+    /// blockchain on which to execute trade
+    #[arg(long, default_value_t = AVALANCHE)]
+    blockchain: Blockchain,
     /// Force a dry run even if --live is also passed.
     #[arg(long)]
     dry_run: bool,
+    /// Show debugging information
     #[arg(short, long)]
     debug: bool,
 }
 
-async fn runoff_continuation(blockchain: &str, from_token: &str, to_token: &str, amount: f64, floor: Option<f64>, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let blockchains: HashMap<String, String> =
-        [("binance", "bsc")].into_iter().map(|(a, b)| (s(a), s(b))).collect();
+async fn runoff_continuation(blockchain: &Blockchain, from_token: &str, to_token: &str, amount: f64, floor: Option<f64>, dry_run: bool, debug: bool) -> ErrStr<()> {
     let floor = floor.unwrap_or(0.0);
-    let wallet_addy = get_env("WALLET_ADDRESS")?;
-    let keystore_addy = get_env("TVA_KEYSTORE_PATH")?;
-    let tokens = read_file(&format!("data/{}.toml", blockchain))?;
-    let registry = load_token_registry(&tokens)?;
-    let block = lookup(&blockchains);
-        
+    let registry = load_token_registry(blockchain)?;
     let ans = attempt_trade_with_actual_amount(
-        &block(blockchain), &wallet_addy, &registry, from_token, to_token, amount, floor, 1000, &keystore_addy, dry_run, debug).await;
-        
+        blockchain, &wallet_addy, &registry, from_token, to_token, amount, floor, 1000, &keystore_path, dry_run, debug).await;
     println!("answer is {ans:?}");
     Ok(())
-
 }
 
 pub async fn runoff_with_args() -> ErrStr<()> {
