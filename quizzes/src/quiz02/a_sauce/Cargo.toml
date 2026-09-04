@@ -1,8 +1,0 @@
-[package]
-name = "a_sauce"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-
-solonge = { package = "libs", path = "../../../../../protocol/libs" }
