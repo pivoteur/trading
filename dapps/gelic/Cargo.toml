@@ -1,12 +1,16 @@
 [package]
-name = "a_gelic"
+name = "gelic"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "gelic"
+path = "../../quizzes/src/quiz02/a_gelic/src/main.rs"
+
 [dependencies]
-book = { path = "../../../../../crypto-n-rust/src/libs/book" }
-trading = { path = "../../../../libs" }
-quizzes = { path = "../../.." }
+book = { path = "../../../crypto-n-rust/src/libs/book" }
+trading = { path = "../../libs" }
+quizzes = { path = "../../quizzes" }
 
 clap = { version = "4.6.6", features = ["derive"] }
 tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
