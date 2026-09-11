@@ -3,9 +3,12 @@ use std::{
    path::Path,
    str::FromStr
 };
+use serde::Deserialize;
+use serde_json::{ Value, from_str };
+
 use book::{
     debug,
-    err_utils::ErrStr,
+    err_utils::{ ErrStr, err_or },
     file_utils::lines_from_file,
     string_utils::s
 };
@@ -18,15 +21,17 @@ use ethers::{
       Address, Bytes, Eip1559TransactionRequest, U256
    },
 };
-use serde::Deserialize;
 use libs::types::{ blockchains:: Blockchain, util::Id };
 
 use super::{
    clients::http_client,
    hex::pad_address_for_call,
    logging::parse_log_ts,
-   tokens::{ TokenRegistry, TokenEntry },
-   types::{ balances::BalanceSnapshot, stats::CumulativeStats },
+   types::{
+      balances::BalanceSnapshot,
+      stats::CumulativeStats,
+      tokens::{ TokenRegistry, TokenEntry }
+   },
    wallets::wallet_balance
 };
 
@@ -56,16 +61,16 @@ fn api_url(blockchain: &Blockchain) -> String {
 }
 
 pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
-                        from_symbol: &str, to_symbol: &str, amount: f64,
-                        debug: bool) -> ErrStr<KyberSwap> {
+                        from: &str, to: &str, amount: f64, debug: bool)
+      -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
-    let from_entry = registry.token(from_symbol)?;
-    let to_entry = registry.token(to_symbol)?;
+    let from_entry = registry.token(from)?;
+    let to_entry = registry.token(to)?;
     fn addy(tok: &str, entry: &TokenEntry) -> ErrStr<String> {
        entry.address.clone().ok_or(format!("No address for token {tok}"))
     }
-    let token_in = addy(from_symbol, &from_entry)?;
-    let token_out = addy(to_symbol, &to_entry)?;
+    let token_in = addy(from, &from_entry)?;
+    let token_out = addy(to, &to_entry)?;
     let amount_in_base =
        (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
 
@@ -75,45 +80,39 @@ pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
                       amount_in_base);
 
     log!("I am calling kyber...");
-    let resp = http_client()?
+    let resp = err_or(http_client()?
         .get(&url)
         .header("X-Client-Id", "pivoteur-autotrader")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .header("Accept", "application/json")
         .send()
-        .await
-        .map_err(|e| format!("KyberSwap route request failed: {e}"))?;
-
-        log!("kyber call completed: HTTP {}", resp.status());
+        .await,
+        "KyberSwap route request failed")?;
     let status = resp.status();
-    let raw_body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Could not read KyberSwap response body: {e}"))?;
-
-    let parsed: serde_json::Value = serde_json::from_str(&raw_body).map_err(|e| {
-        format!("KyberSwap response did not parse (HTTP {status}): {e}\nRaw body: {raw_body}")
-    })?;
-
+    log!("kyber call completed: HTTP {}", status);
+    let raw_body = err_or(resp.text().await,
+                          "Could not read KyberSwap response body")?;
+    let parsed: Value = err_or(from_str(&raw_body),
+        &format!("KyberSwap response did not parse (HTTP {status})
+Raw body: {raw_body}"))?;
     let data = parsed
         .get("data")
-        .ok_or_else(|| format!("KyberSwap returned no route ({from_symbol} -> {to_symbol}). Raw: {raw_body}"))?;
+        .ok_or(format!("KyberSwap returned no route ({from} -> {to}). Raw: {raw_body}"))?;
     let route_summary_raw = data
         .get("routeSummary")
         .cloned()
-        .ok_or_else(|| format!("Response missing routeSummary. Raw: {raw_body}"))?;
+        .ok_or(format!("Response missing routeSummary. Raw: {raw_body}"))?;
     let router_address = data
         .get("routerAddress")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Response missing routerAddress. Raw: {raw_body}"))?
+        .ok_or(format!("Response missing routerAddress. Raw: {raw_body}"))?
         .to_string();
     let amount_out_str = route_summary_raw
         .get("amountOut")
         .and_then(|v| v.as_str())
         .ok_or(format!("routeSummary missing amountOut. Raw: {raw_body}"))?;
-    let raw: u128 = amount_out_str
-        .parse()
-        .map_err(|_| format!("Could not parse amountOut '{amount_out_str}'"))?;
+    let raw: u128 = err_or(amount_out_str.parse(),
+        &format!("Could not parse amountOut '{amount_out_str}'"))?;
     let amount_out = raw as f64 / 10f64.powi(to_entry.decimals as i32);
 
     Ok(KyberSwap { amount_out, route_summary_raw, router_address })
@@ -132,16 +131,19 @@ pub struct OpenPivot {
     pub proper_amount: f64,
 }
 
-pub async fn pool_balance(addy: &str, registry: &TokenRegistry, prim: &str,
+pub async fn pool_balance(blockchain: &Blockchain, addy: &str,
+                          registry: &TokenRegistry, prim: &str,
                           committed: f64, undead_committed: f64)
       -> ErrStr<BalanceSnapshot> {
     // Two independent reads
-    let asset_balance = wallet_balance(wallet_address, asset_symbol, registry)?;
-    let undead_balance = wallet_balance(wallet_address, UNDEAD, registry)?;
+    let asset_balance =
+       wallet_balance(blockchain, addy, prim, registry).await?;
+    let undead_balance =
+       wallet_balance(blockchain, addy, UNDEAD, registry).await?;
     Ok(BalanceSnapshot {
         asset_balance,
         asset_committed: committed,
-        asset_available: asset_balance - asset_committed,
+        asset_available: asset_balance - committed,
         undead_balance,
         undead_committed,
         undead_available: undead_balance - undead_committed,
@@ -364,50 +366,50 @@ fn slippage_adjusted_floor(min_floor: f64, slippage_bps: u16) -> f64 {
 /// Quotes, checks the floor, and (unless dry-running) executes — the one
 /// trade-attempt pipeline every pivot open/close in this system goes
 /// through, regardless of which binary is calling it.
-#[allow(clippy::too_many_arguments)]
-pub async fn attempt_trade_with_actual_amount(
-    blockchain: &Blockchain,
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    from_symbol: &str,
-    to_symbol: &str,
-    amount: f64,
-    min_floor: f64,
-    slippage_bps: u16,
-    keystore_path: &str,
-    dry_run: bool,
-    debug: bool,
-) -> ErrStr<AttemptOutcome> {
+pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
+     addy: &str, registry: &TokenRegistry, from: &str, to: &str, amount: f64,
+     min_floor: f64, slippage_bps: u16, keystore_path: &str,
+     dry_run: bool, debug: bool) -> ErrStr<AttemptOutcome> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
-    let swap = query_swap(blockchain, registry, from_symbol, to_symbol, amount, debug).await?;
+    let swap = query_swap(blockchain, registry, from, to, amount, debug).await?;
     if swap.amount_out <= guaranteed_floor {
-            debug_trade_result(None, "NOT CLEARED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
-
+            debug_trade_result(None, "NOT CLEARED", from, to, amount, &swap,
+                               min_floor, debug);
         Ok(AttemptOutcome::NotCleared)
     } else {
         if dry_run {
-                debug_trade_result(None, "DRY-RUN WOULD CLEAR", from_symbol, to_symbol, amount, &swap, min_floor, debug);
-            Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out: swap.amount_out })
+           debug_trade_result(None, "DRY-RUN WOULD CLEAR", from, to, amount,
+                              &swap, min_floor, debug);
+           Ok(AttemptOutcome::DryRunWouldClear {
+              quoted_amount_out: swap.amount_out
+           })
         } else {
-            let balance_before = wallet_balance(wallet_address, to_symbol, registry).await?;
-            let (tx_hash, gas_avax) = execute_trade(blockchain, wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, keystore_path, debug).await?;
-            let balance_after = wallet_balance(wallet_address, to_symbol, registry).await?;
+            let balance_before =
+               wallet_balance(blockchain, addy, to, registry).await?;
+            let (tx_hash, gas_avax) =
+               execute_trade(blockchain, addy, registry, from, to, amount,
+                             min_floor, slippage_bps, keystore_path,
+                             debug).await?;
+            let balance_after =
+               wallet_balance(blockchain, addy, to, registry).await?;
             let actual_received = balance_after - balance_before;
-                debug_trade_result(Some(&tx_hash), "EXECUTED", from_symbol, to_symbol, amount, &swap, min_floor, debug);
+                debug_trade_result(Some(&tx_hash), "EXECUTED", from, to,
+                                   amount, &swap, min_floor, debug);
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
         }
     }
 }
 
-fn debug_trade_result(tx: Option<&str>, kind: &str, from_symbol: &str, to_symbol: &str, amount: f64, swap: &KyberSwap, min_floor: f64, debug: bool) {
-    if debug {
-        eprintln!(
-            "[{kind}] Trade {from_symbol} -> {to_symbol} {} swap {amount:.4} -> {amount_out:.4} (floor {floor:.4})",
-            if tx.is_some() { format!("tx {}", tx.unwrap()) } else { s("") },
-            amount_out = swap.amount_out,
-            floor = min_floor
-        );
-    }
+fn debug_trade_result(tx: Option<&str>, kind: &str, from: &str, to: &str,
+                      amount: f64, swap: &KyberSwap, min_floor: f64,
+                      debug: bool) {
+   debug!("attempt_trade_with_actual_amount", debug);
+   let trade = format!("Trade {from} -> {to}");
+   let mb_tx = tx.and_then(|t| Some(format!("tx {t}"))).unwrap_or_default();
+   let swap = format!("swap {amount:.4} -> {:.4}", swap.amount_out);
+   let floor = format!("(floor {min_floor:.4})");
+   let line = format!("{trade} {mb_tx} {swap} {floor}");
+   log!("[{}] {}", kind, line);
 }
 
 //============================================================================
@@ -416,18 +418,15 @@ fn debug_trade_result(tx: Option<&str>, kind: &str, from_symbol: &str, to_symbol
 // Everything past this point can move real funds. Every function here is
 // deliberately loud on failure.
 
-fn pad_u256_for_call(amount: u128) -> String {
-    let ans = format!("{amount:064x}");
-    ans
-}
+fn pad_u256_for_call(amount: u128) -> String { format!("{amount:064x}") }
 
 /// AVAX cost of a confirmed transaction, computed from its own receipt
 /// (gas_used * effective_gas_price), not estimated beforehand. If a
 /// receipt is somehow missing pricing info, returns 0.0 rather than
 /// failing the whole trade over a cosmetic figure — the trade itself
 /// already succeeded by the time this is called.
-fn gas_cost_avax(gas_used: Option<U256>, effective_gas_price: Option<U256>) -> f64 {
-    match (gas_used, effective_gas_price) {
+fn gas_cost_avax(gas_used: Option<U256>, gas_price: Option<U256>) -> f64 {
+    match (gas_used, gas_price) {
         (Some(g), Some(p)) => {
             let wei = g.saturating_mul(p);
             wei.as_u128() as f64 / 1e18
@@ -629,30 +628,23 @@ pub async fn send_swap_tx(
 /// tokens.toml address to encode against) — only ERC-20s with a real
 /// contract address. `to_address` is always a literal here — nothing in
 /// this file resolves an address from env internally anymore.
-async fn send_tokens_raw(
-    blockchain: &Blockchain,
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    symbol: &str,
-    to_address: &str,
-    amount: f64,
-    keystore_path: &str,
-    verbose: bool,
-) -> ErrStr<(String, f64)> {
+pub async fn send_tokens_to_address(blockchain: &Blockchain,
+                                    addy: &str, registry: &TokenRegistry,
+                                    symbol: &str, to_address: &str,
+                                    amount: f64, keystore_path: &str,
+                                    verbose: bool) -> ErrStr<(String, f64)> {
+    debug!("send_tokens_to_address", verbose);
     if amount <= 0.0 {
-        return Err(format!("send_tokens_to_address: amount must be positive, got {amount}"));
+        return Err(format!("amount must be positive, got {amount}"));
     }
-
-    let signer = load_signer(wallet_address, keystore_path).await?;
+    let signer = load_signer(blockchain, addy, keystore_path).await?;
     let provider = Provider::<Http>::try_from(&blockchain.url())
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
-
     let entry = registry.token(symbol)?;
-    let token_addr = entry.address.as_deref().ok_or_else(|| {
-        format!("'{symbol}' has no address in tokens.toml (or is native — send_tokens_to_address only supports ERC-20 transfers)")
-    })?;
-    let amount_base = (amount * 10f64.powi(entry.decimals as i32)).round() as u128;
+    let token_addr = entry.address.ok_or(format!("No address for {symbol}"))?;
+    let amount_base =
+       (amount * 10f64.powi(entry.decimals as i32)).round() as u128;
 
     // transfer(address,uint256) selector = 0xa9059cbb
     let data_hex = format!(
@@ -660,31 +652,19 @@ async fn send_tokens_raw(
         pad_address_for_call(to_address),
         pad_u256_for_call(amount_base)
     );
-    let to = Address::from_str(token_addr).map_err(|e| format!("Bad token address: {e}"))?;
-    let data = Bytes::from_str(&data_hex).map_err(|e| format!("Bad transfer calldata: {e}"))?;
+    let to = err_or(Address::from_str(&token_addr), "Bad token address")?;
+    let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
-
-    if !verbose {
-        println!("    On its way — courier's en route...");
-    }
-
-    let pending = client
-        .send_transaction(tx, None)
-        .await
-        .map_err(|e| format!("Transfer transaction failed to send: {e}"))?;
+    log!("    On its way — courier's en route...");
+    let pending = err_or(client.send_transaction(tx, None).await,
+                         "Transfer transaction failed to send")?;
     let tx_hash = format!("{:?}", pending.tx_hash());
-    if verbose {
-        println!("    Transfer tx submitted: {tx_hash}");
-    }
-
-    let receipt = pending
-        .await
-        .map_err(|e| format!("Transfer transaction failed while confirming: {e}"))?;
+    log!("    Transfer tx submitted: {}", tx_hash);
+    let receipt = err_or(pending.await,
+                         "Transfer transaction failed while confirming")?;
     match receipt {
         Some(r) if r.status == Some(1.into()) => {
-            if verbose {
-                println!("    Transfer confirmed in block {:?}", r.block_number);
-            }
+            log!("    Transfer confirmed in block {:?}", r.block_number);
             Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
         }
         Some(_) => Err(format!("Transfer transaction REVERTED on-chain. Hash: {tx_hash}")),
@@ -692,31 +672,12 @@ async fn send_tokens_raw(
     }
 }
 
-pub async fn send_tokens_to_address(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    symbol: &str,
-    to_address: &str,
-    amount: f64,
-    keystore_path: &str,
-    verbose: bool,
-) -> ErrStr<(String, f64)> {
-    send_tokens_raw(
-        wallet_address,
-        registry,
-        symbol,
-        to_address,
-        amount,
-        keystore_path,
-        verbose,
-    )
-    .await
-}
-
 //============================================================================
 //----- UNIT TESTS -------------------------------------------------------------
 //============================================================================
+
 #[cfg(test)]
+#[cfg(not(tarpaulin_include))]
 mod unit_tests {
     use super::*;
     use crate::tokens::fetch_tokens;
@@ -1003,54 +964,62 @@ pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
                            amount: f64, min_floor: f64, slippage_bps: u16,
                            keystore_path: &str, verbose: bool)
       -> ErrStr<(String, f64)> {
-    let signer = load_signer(blockchain, wallet_address, keystore_path).await?;
-    let provider = Provider::<Http>::try_from(blockchain.url())
-        .map_err(|e| format!("Could not create RPC provider: {e}"))?;
-    let client = SignerMiddleware::new(provider, signer);
+    debug!("execute_trade", verbose);
+    log!("Trading in progress — approve/quote/swap. This part takes a minute.");
+    log!(">>> Re-checking the quote after keystore unlock (it may have moved)");
+    let fresh_quote =
+       query_swap(blockchain, registry, from, to, amount, verbose).await?;
+    let ratio = fresh_quote.amount_out;
+    let trade = format!("{amount:.6} {from} -> {:.8} {to}", ratio);
+    log!("Fresh quote: {}", trade);
 
-    if !verbose {
-        println!("  Trading in progress — approve, quote, swap. This part takes a minute...");
-    }
-    if verbose {
-        println!(">>> Re-checking the quote after keystore unlock (it may have moved)...");
-    }
-    let fresh_quote = query_swap(blockchain, registry, from_symbol, to_symbol, amount, verbose).await?;
-    if verbose {
-        println!("Fresh quote: {amount:.6} {from_symbol} -> {:.8} {to_symbol} now", fresh_quote.amount_out);
-    }
     // See slippage_adjusted_floor: the swap below is authorized (via
     // slippage_bps) to settle as low as fresh_quote * (1 - slippage_bps),
     // so the fresh quote itself must clear that worse case, not just
     // min_floor, or a real close can settle under floor.
+
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     if fresh_quote.amount_out < guaranteed_floor {
-        return Err(format!(
-            "Quote moved below your floor while unlocking the keystore ({:.8} {to_symbol} quoted, but only {:.8} {to_symbol} is guaranteed at {slippage_bps} bps slippage tolerance -- need > {min_floor:.8} {to_symbol}). \
-             That's not happening. No funds used.",
-            fresh_quote.amount_out,
-            fresh_quote.amount_out * (1.0 - slippage_bps as f64 / 10_000.0)
-        ));
-    }
+       Err(format!("Quote moved below your floor while unlocking the keystore
+({:.8} {to} quoted, but only {:.8} {to} is guaranteed at {slippage_bps} bps
+slippage tolerance -- need > {min_floor:.8} {to}).
 
-    let from_entry = registry.token(from_symbol)?;
-    let from_addr = from_entry.address.as_deref().ok_or_else(|| format!("{from_symbol} missing address"))?.to_string();
-    let amount_base = (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
-
-    if verbose {
-        println!(">>> Approving exact amount ({amount:.6} {from_symbol}) for the router...");
+That's not happening. No funds used.", ratio,
+           ratio * (1.0 - slippage_bps as f64 / 10_000.0)
+        ))
+    } else {
+       execute_trade_continuation(blockchain, addy, keystore_path,
+                                  registry, from, amount, fresh_quote,
+                                  slippage_bps, verbose).await
     }
-    let approve_gas = approve_exact_amount(&client, &from_addr, &fresh_quote.router_address, amount_base, verbose).await?;
+}
 
-    if verbose {
-        println!(">>> Requesting swap calldata from KyberSwap...");
-    }
+async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
+                                    keystore_path: &str,
+                                    registry: &TokenRegistry, from: &str,
+                                    amount: f64, fresh_quote: KyberSwap,
+                                    slippage_bps: u16, verbose: bool)
+      -> ErrStr<(String, f64)> {
+    debug!("execute_trade_continuation", verbose);
+    let signer = load_signer(blockchain, addy, keystore_path).await?;
+    let provider = err_or(Provider::<Http>::try_from(blockchain.url()),
+                          "Could not create RPC provider")?;
+    let client = SignerMiddleware::new(provider, signer);
+    let from_entry = registry.token(from)?;
+    let from_addr = from_entry.address.ok_or(format!("No address for {from}"))?;
+    let amount_base =
+       (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
+    log!(">>> Approving exact amount ({:.6} {}) for the router", amount, from);
+    let approve_gas =
+       approve_exact_amount(&client, &from_addr, &fresh_quote.router_address,
+                            amount_base, verbose).await?;
+    log!(">>> Requesting swap calldata from KyberSwap...");
     let (router, calldata) =
-        kyberswap_build(blockchain, &fresh_quote.route_summary_raw, wallet_address, slippage_bps, verbose).await?;
-
-    if verbose {
-        println!(">>> Sending swap transaction...");
-    }
-    let (tx_hash, swap_gas) = send_swap_tx(&client, &router, &calldata, verbose).await?;
+        kyberswap_build(blockchain, &fresh_quote.route_summary_raw, addy, 
+                        slippage_bps, verbose).await?;
+    log!(">>> Sending swap transaction...");
+    let (tx_hash, swap_gas) =
+       send_swap_tx(&client, &router, &calldata, verbose).await?;
 
     Ok((tx_hash, approve_gas + swap_gas))
 }

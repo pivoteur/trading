@@ -1,4 +1,9 @@
-use std::{ fs::OpenOptions, path::Path, time::{ SystemTime, UNIX_EPOCH } };
+use std::{
+   fs::OpenOptions,
+   io::Write,
+   path::Path,
+   time::{ SystemTime, UNIX_EPOCH }
+};
 use chrono::{ DateTime, Utc };
 use book::err_utils::ErrStr;
 use libs::types::util::Id;
@@ -47,7 +52,6 @@ pub fn log_row(path: &str, header: Option<&str>, kind: &str,
                prim_amount: f64, proper_amount: f64, gain: Option<f64>,
                roi: Option<f64>, apr: Option<f64>, gas_avax: f64, tx_hash: &str,
                snap: &BalanceSnapshot, cum: &CumulativeStats) {
-
     fn show<T: ToString>(item: Option<T>) -> String {
        item.and_then(|i| Some(i.to_string())).unwrap_or_default()
     }
@@ -57,26 +61,37 @@ pub fn log_row(path: &str, header: Option<&str>, kind: &str,
     fn show8(biggy: Option<f64>) -> String {
        biggy.and_then(|n| Some(format!("{n:+.8}"))).unwrap_or_default()
     }
-    fn shows<T>(v: &[Option<T>]) -> String {
-       let s: Vec<String> = v.iter().map(show).collect();
+    fn shows<T: ToString>(v: Vec<Option<T>>) -> String {
+       let s: Vec<String> = v.into_iter().map(show).collect();
        s.join("\t")
     }
-    let line0 = shows(&[pivot_id, close_id, opened_pivot_id]);
+    let line0 = shows(vec![pivot_id, close_id, opened_pivot_id]);
     let line1 = [kind, &line0, prim, proper].join("\t");
     let line2 = format!("{line1}\t{prim_amount:.8}\t{proper_amount:.8}");
-    let line3 = [show8(gain), show6(roi), show6(apr)];
+    let line3 = [show8(gain), show6(roi), show6(apr)].join("\t");
+    let line4 = format!("{gas_avax:.8}\t{tx_hash}");
     let pen = snapshot_and_cumulative_columns(snap, cum);
-    let ult = format!("{}\t{line2}\t{line3}\t{pen}", log_ts());
+    let ult = format!("{}\t{line2}\t{line3}\t{line4}\t{pen}", log_ts());
     
     append_trade_log_line(path, &ult, header);
 }
 
-pub fn log_open(path: &str, header: Option<&str>, pivot_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "OPEN", Some(pivot_id), None, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
+pub fn log_open(path: &str, header: Option<&str>, pivot_id: Id, 
+                prim: &str, prim_amount: f64, proper: &str, proper_amount: f64,
+                gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, 
+                cum: &CumulativeStats) {
+    log_row(path, header, "OPEN", Some(pivot_id), None, None, prim, proper,
+            prim_amount, proper_amount, None, None, None, gas_avax, tx_hash,
+            snap, cum);
 }
 
-pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "CLOSE", None, Some(close_id), Some(pivot_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
+pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id, 
+                 prim: &str, prim_amount: f64, proper: &str, proper_amount: f64,
+                 gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, 
+                 snap: &BalanceSnapshot, cum: &CumulativeStats) {
+    log_row(path, header, "CLOSE", None, Some(close_id), Some(pivot_id), 
+            prim, proper, prim_amount, proper_amount, Some(gain),
+            Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
 }
 
 pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str, prim_amount: f64, proper_amount: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
