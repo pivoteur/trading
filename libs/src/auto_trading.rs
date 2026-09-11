@@ -1,12 +1,8 @@
 use std::{
    collections::HashMap,
-   fs::OpenOptions,
-   io::Write,
    path::Path,
-   str::FromStr,
-   time::{Duration, SystemTime, UNIX_EPOCH}
+   str::FromStr
 };
-use chrono::{DateTime, Utc};
 use book::{
     debug,
     err_utils::ErrStr,
@@ -25,7 +21,14 @@ use ethers::{
 use serde::Deserialize;
 use libs::types::{ blockchains:: Blockchain, util::Id };
 
-use super::tokens::{ TokenRegistry, TokenEntry };
+use super::{
+   clients::http_client,
+   hex::pad_address_for_call,
+   logging::parse_log_ts,
+   tokens::{ TokenRegistry, TokenEntry },
+   types::{ balances::BalanceSnapshot, stats::CumulativeStats },
+   wallets::wallet_balance
+};
 
 //============================================================================
 //----- Shared Trading Constants -----------------------------------------------
@@ -33,106 +36,6 @@ use super::tokens::{ TokenRegistry, TokenEntry };
 
 pub const UNDEAD: &str = "UNDEAD";
 pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
-
-//============================================================================
-//----- Shared HTTP Client ----------------------------------------------------
-//============================================================================
-const HTTP_TIMEOUT_SECS: u64 = 15;
-fn http_client() -> ErrStr<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("Could not build HTTP client: {e}"))
-}
-
-//============================================================================
-//----- Wallet Balance Check --------------------------------------------------
-//============================================================================
-
-pub const AVALANCHE_RPC: &str = "https://api.avax.network/ext/bc/C/rpc";
-pub const AVALANCHE_CHAIN_ID: u64 = 43114;
-
-#[derive(Debug, Deserialize)]
-struct RpcResponse {
-    result: Option<String>,
-    error:  Option<serde_json::Value>,
-}
-
-async fn rpc_call(method: &str, params: serde_json::Value) -> ErrStr<String> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": 1
-    });
-    let resp = http_client()?
-        .post(AVALANCHE_RPC)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("RPC request ({method}) failed: {e}"))?;
-    let parsed: RpcResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("RPC response for {method} did not parse: {e}"))?;
-    if let Some(err) = parsed.error {
-        return Err(format!("RPC error for {method}: {err}"));
-    }
-    parsed
-        .result
-        .ok_or_else(|| format!("RPC call {method} returned no result"))
-}
-
-fn hex_to_u128(hex: &str) -> ErrStr<u128> {
-    let trimmed = hex.trim_start_matches("0x");
-    let trimmed = if trimmed.is_empty() { "0" } else { trimmed };
-    u128::from_str_radix(trimmed, 16)
-        .map_err(|e| format!("Could not parse hex balance '{hex}': {e}"))
-}
-
-fn pad_address_for_call(address: &str) -> String {
-    let hex = address.trim_start_matches("0x").to_lowercase();
-    let ans = format!("{hex:0>64}");
-    ans
-}
-
-async fn erc20_balance(wallet_address: &str, token_contract: &str) -> ErrStr<u128> {
-    // balanceOf(address) selector = 0x70a08231
-    let data = format!("0x70a08231{}", pad_address_for_call(wallet_address));
-    let result = rpc_call(
-        "eth_call",
-        serde_json::json!([{ "to": token_contract, "data": data }, "latest"]),
-    )
-    .await?;
-    hex_to_u128(&result)
-}
-
-async fn native_coin_balance(wallet_address: &str) -> ErrStr<u128> {
-    let result = rpc_call(
-        "eth_getBalance",
-        serde_json::json!([wallet_address, "latest"]),
-    )
-    .await?;
-    hex_to_u128(&result)
-}
-
-pub async fn wallet_balance(
-    wallet_address: &str,
-    symbol: &str,
-    registry: &TokenRegistry
-) -> ErrStr<f64> {
-    let entry = registry.token(symbol)?;
-    let raw = if entry.native {
-        native_coin_balance(wallet_address).await?
-    } else {
-        let addr = entry
-            .address
-            .as_deref()
-            .ok_or_else(|| format!("'{symbol}' is not marked native and has no address in tokens.toml — add one or set native = true"))?;
-        erc20_balance(wallet_address, addr).await?
-    };
-    Ok(raw as f64 / 10f64.powi(entry.decimals as i32))
-}
 
 //============================================================================
 //----- Live KyberSwap Quote --------------------------------------------------
@@ -229,51 +132,15 @@ pub struct OpenPivot {
     pub proper_amount: f64,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CumulativeStats {
-    pub total_opens:       usize,
-    pub total_closes:      usize,
-    pub total_gain_asset:  f64,
-    pub total_gain_undead: f64,
-    pub total_gas_avax:    f64,
-    pub roi_sum: f64,
-    pub apr_sum: f64,
-}
-
-impl CumulativeStats {
-    pub fn avg_roi(&self) -> f64 {
-        if self.total_closes == 0 { 0.0 } else { self.roi_sum / self.total_closes as f64 }
-    }
-    pub fn avg_apr(&self) -> f64 {
-        if self.total_closes == 0 { 0.0 } else { self.apr_sum / self.total_closes as f64 }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct BalanceSnapshot {
-    pub asset_balance:    f64,
-    pub asset_committed:  f64,
-    pub asset_available:  f64,
-    pub undead_balance:   f64,
-    pub undead_committed: f64,
-    pub undead_available: f64,
-}
-
-pub async fn balance_snapshot(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    asset_symbol: &str,
-    asset_committed: f64,
-    undead_committed: f64,
-) -> ErrStr<BalanceSnapshot> {
+pub async fn pool_balance(addy: &str, registry: &TokenRegistry, prim: &str,
+                          committed: f64, undead_committed: f64)
+      -> ErrStr<BalanceSnapshot> {
     // Two independent reads
-    let (asset_balance, undead_balance) = tokio::try_join!(
-        wallet_balance(wallet_address, asset_symbol, registry),
-        wallet_balance(wallet_address, UNDEAD, registry),
-    )?;
+    let asset_balance = wallet_balance(wallet_address, asset_symbol, registry)?;
+    let undead_balance = wallet_balance(wallet_address, UNDEAD, registry)?;
     Ok(BalanceSnapshot {
         asset_balance,
-        asset_committed,
+        asset_committed: committed,
         asset_available: asset_balance - asset_committed,
         undead_balance,
         undead_committed,
@@ -281,105 +148,13 @@ pub async fn balance_snapshot(
     })
 }
 
-pub fn snapshot_and_cumulative_columns(snap: &BalanceSnapshot, cum: &CumulativeStats) -> String {
-    let ans = format!(
-        "{:.8}\t{:.8}\t{:.8}\t{:.2}\t{:.2}\t{:.2}\t{:+.8}\t{:+.2}\t{:.8}\t{:.6}\t{:.6}",
-        snap.asset_balance, snap.asset_committed, snap.asset_available,
-        snap.undead_balance, snap.undead_committed, snap.undead_available,
-        cum.total_gain_asset, cum.total_gain_undead, cum.total_gas_avax,
-        cum.avg_roi(), cum.avg_apr(),
-    );
-    ans
-}
-
-/// "Biggest position first" — every survey/cycle closes its largest
+// "Biggest position first" — every survey/cycle closes its largest
 /// commitments before its smallest.
 pub fn biggest_first(mut pivots: Vec<OpenPivot>) -> Vec<OpenPivot> {
     pivots.sort_by(|a, b| {
         b.proper_amount.partial_cmp(&a.proper_amount).unwrap_or(std::cmp::Ordering::Equal)
     });
     pivots
-}
-
-pub fn now_ts() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-pub const LOG_TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
-
-pub fn log_ts(epoch: u64) -> String {
-    DateTime::<Utc>::from_timestamp(epoch as i64, 0)
-        .map(|dt| dt.format(LOG_TS_FORMAT).to_string())
-        .unwrap_or_else(|| format!("(bad timestamp: {epoch})"))
-}
-
-pub fn parse_log_ts(s: &str) -> ErrStr<u64> {
-    chrono::NaiveDateTime::parse_from_str(s, LOG_TS_FORMAT)
-        .map(|ndt| ndt.and_utc().timestamp() as u64)
-        .map_err(|e| format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}', e.g. '2026-08-05 14:32:07'): {e}"))
-}
-
-pub fn append_trade_log_line(path: &str, line: &str, header: Option<&str>) {
-    let needs_header = header.is_some() && !Path::new(path).exists();
-    let result = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| -> std::io::Result<()> {
-            if needs_header {
-                writeln!(f, "{}", header.unwrap())?;
-            }
-            writeln!(f, "{line}")?;
-            Ok(())
-        });
-    if let Err(e) = result {
-        eprintln!("Warning: could not write to trade log ({path}): {e}");
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn log_row(
-    path: &str,
-    header: Option<&str>,
-    kind: &str,
-    pivot_id: Option<Id>,
-    close_id: Option<Id>,
-    opened_pivot_id: Option<Id>,
-    prim: &str,
-    proper: &str,
-    prim_amount: f64,
-    proper_amount: f64,
-    gain: Option<f64>,
-    roi: Option<f64>,
-    apr: Option<f64>,
-    gas_avax: f64,
-    tx_hash: &str,
-    snap: &BalanceSnapshot,
-    cum: &CumulativeStats,
-) {
-    let pivot_id_s = pivot_id.map(|v| v.to_string()).unwrap_or_default();
-    let close_id_s = close_id.map(|v| v.to_string()).unwrap_or_default();
-    let opened_pivot_id_s = opened_pivot_id.map(|v| v.to_string()).unwrap_or_default();
-    let gain_s = gain.map(|v| format!("{v:+.8}")).unwrap_or_default();
-    let roi_s = roi.map(|v| format!("{v:.6}")).unwrap_or_default();
-    let apr_s = apr.map(|v| format!("{v:.6}")).unwrap_or_default();
-    append_trade_log_line(path, &format!(
-        "{}\t{kind}\t{pivot_id_s}\t{close_id_s}\t{opened_pivot_id_s}\t{prim}\t{proper}\t{prim_amount:.8}\t{proper_amount:.8}\t{gain_s}\t{roi_s}\t{apr_s}\t{gas_avax:.8}\t{tx_hash}\t{}",
-        log_ts(now_ts()), snapshot_and_cumulative_columns(snap, cum)
-    ), header);
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn log_open(path: &str, header: Option<&str>, pivot_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "OPEN", Some(pivot_id), None, None, prim, proper, prim_amount, proper_amount, None, None, None, gas_avax, tx_hash, snap, cum);
-}
-#[allow(clippy::too_many_arguments)]
-pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id, prim: &str, prim_amount: f64, proper: &str, proper_amount: f64, gain: f64, roi: f64, apr: f64, gas_avax: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "CLOSE", None, Some(close_id), Some(pivot_id), prim, proper, prim_amount, proper_amount, Some(gain), Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
-}
-#[allow(clippy::too_many_arguments)]
-pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str, prim_amount: f64, proper_amount: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "MISFIRE", None, None, None, prim, proper, prim_amount, proper_amount, None, None, None, 0.0, tx_hash, snap, cum);
 }
 
 //----- Misfire Reporting ------------------------------------------------------
@@ -661,7 +436,8 @@ fn gas_cost_avax(gas_used: Option<U256>, effective_gas_price: Option<U256>) -> f
     }
 }
 
-pub async fn load_signer(expected_address: &str, keystore_path: &str) -> ErrStr<LocalWallet> {
+pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
+                         keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
         Ok(pw) => pw,
         Err(_) => rpassword::prompt_password("Keystore password: ")
@@ -669,7 +445,7 @@ pub async fn load_signer(expected_address: &str, keystore_path: &str) -> ErrStr<
     };
     let wallet = LocalWallet::decrypt_keystore(&keystore_path, &password)
         .map_err(|e| format!("Could not decrypt keystore, path {keystore_path}: {e}. No funds moved."))?
-        .with_chain_id(AVALANCHE_CHAIN_ID);
+        .with_chain_id(blockchain.chain_id());
     let derived = format!("{:?}", wallet.address());
     if !derived.eq_ignore_ascii_case(expected_address) {
         return Err(format!(
@@ -729,21 +505,20 @@ pub async fn approve_exact_amount(
         pad_address_for_call(spender),
         pad_u256_for_call(amount_base_units)
     );
-    let to = Address::from_str(token_contract).map_err(|e| format!("Bad token address: {e}"))?;
-    let data = Bytes::from_str(&data_hex).map_err(|e| format!("Bad approve calldata: {e}"))?;
+    let to = Address::from_str(token_contract)
+                     .map_err(|e| format!("Bad token address: {e}"))?;
+    let data = Bytes::from_str(&data_hex)
+                     .map_err(|e| format!("Bad approve calldata: {e}"))?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
 
-    let pending = client
-        .send_transaction(tx, None)
-        .await
-        .map_err(|e| format!("Approve transaction failed to send: {e}"))?;
+    let pending = err_or(client.send_transaction(tx, None).await,
+                         "Approve transaction failed to send")?;
     if verbose {
         println!("    Approve tx submitted: {:?}", pending.tx_hash());
     }
 
-    let receipt = pending
-        .await
-        .map_err(|e| format!("Approve transaction failed while confirming: {e}"))?;
+    let receipt = err_or(pending.await,
+                         "Approve transaction failed while confirming")?;
     match receipt {
         Some(r) => {
             if verbose {
@@ -751,7 +526,7 @@ pub async fn approve_exact_amount(
             }
             Ok(gas_cost_avax(r.gas_used, r.effective_gas_price))
         }
-        None => Err("Approve transaction was dropped or replaced".to_string()),
+        None => Err(s("Approve transaction was dropped or replaced"))
     }
 }
 
@@ -855,6 +630,7 @@ pub async fn send_swap_tx(
 /// contract address. `to_address` is always a literal here — nothing in
 /// this file resolves an address from env internally anymore.
 async fn send_tokens_raw(
+    blockchain: &Blockchain,
     wallet_address: &str,
     registry: &TokenRegistry,
     symbol: &str,
@@ -868,7 +644,7 @@ async fn send_tokens_raw(
     }
 
     let signer = load_signer(wallet_address, keystore_path).await?;
-    let provider = Provider::<Http>::try_from(AVALANCHE_RPC)
+    let provider = Provider::<Http>::try_from(&blockchain.url())
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
 
@@ -943,12 +719,12 @@ pub async fn send_tokens_to_address(
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::tokens::load_tokens;
+    use crate::tokens::fetch_tokens;
     use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
-      let tokens = load_tokens(blockchain).await?;
+      let tokens = fetch_tokens(blockchain).await?;
       let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await;
       assert!(query.is_ok());
       Ok(())
@@ -956,7 +732,7 @@ mod unit_tests {
 
    #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
-      let tokens = load_tokens(blockchain).await?;
+      let tokens = fetch_tokens(blockchain).await?;
       let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await?;
       let ratio = query.amount_out;
       assert!(ratio > 16.0, "The ratio BTC/ETH is {ratio}");
@@ -1222,20 +998,13 @@ mod unit_tests {
     }
 }
 
-pub async fn execute_trade(
-    blockchain: &Blockchain,
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    from_symbol: &str,
-    to_symbol: &str,
-    amount: f64,
-    min_floor: f64,
-    slippage_bps: u16,
-    keystore_path: &str,
-    verbose: bool,
-) -> ErrStr<(String, f64)> {
-    let signer = load_signer(wallet_address, keystore_path).await?;
-    let provider = Provider::<Http>::try_from(AVALANCHE_RPC)
+pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
+                           registry: &TokenRegistry, from: &str, to: &str,
+                           amount: f64, min_floor: f64, slippage_bps: u16,
+                           keystore_path: &str, verbose: bool)
+      -> ErrStr<(String, f64)> {
+    let signer = load_signer(blockchain, wallet_address, keystore_path).await?;
+    let provider = Provider::<Http>::try_from(blockchain.url())
         .map_err(|e| format!("Could not create RPC provider: {e}"))?;
     let client = SignerMiddleware::new(provider, signer);
 

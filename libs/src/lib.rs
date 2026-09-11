@@ -1,5 +1,9 @@
+pub mod addresses;
 pub mod auto_trading;
+pub mod clients;
 pub mod git_resources;
+pub mod hex;
+pub mod logging;
 pub mod path_utils;
-
-pub mod tokens;
+pub mod types;
+pub mod wallets;

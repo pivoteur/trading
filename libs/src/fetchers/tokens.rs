@@ -9,27 +9,13 @@ use book::{
    string_utils::s
 };
 use libs::types::blockchains::Blockchain;
-use super::path_utils::token_url;
+use super::{ path_utils::token_url, types::tokens::TokenRegistry };
 
 //============================================================================
 //----- Token Registry --------------------------------------------------------
 //============================================================================
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct TokenEntry {
-    #[serde(default)]
-    pub native:   bool,
-    #[serde(default)]
-    pub address:  Option<String>,
-    pub decimals: u32
-}
-
-#[derive(Debug)]
-pub struct TokenRegistry {
-   tokens: HashMap<String, TokenEntry>
-}
-
-pub async fn load_tokens(blockchain: &Blockchain) -> ErrStr<TokenRegistry> {
+pub async fn fetch_tokens(blockchain: &Blockchain) -> ErrStr<TokenRegistry> {
    let url = token_url(blockchain);
    let raw = read_rest(&url).await?;
    parse_token_registry(&raw)
@@ -41,33 +27,6 @@ fn parse_token_registry(toml_str: &str) -> ErrStr<TokenRegistry> {
     let tokens = toml::from_str(toml_str)
          .map_err(|e| format!("Failed to parse tokens.toml: {e}"))?;
     Ok(TokenRegistry { tokens })
-}
-
-impl TokenRegistry {
-   pub fn token(&self, symbol: &str) -> ErrStr<TokenEntry> {
-      self.tokens.get(&symbol.to_uppercase())
-                 .ok_or(format!("No entry for {symbol}")).cloned()
-   }
-}
-
-impl CsvWriter for TokenRegistry {
-   fn ncols(&self) -> usize { 4 }
-   fn as_csv(&self) -> String {
-      let vals: Vec<TokenEntry> = self.tokens.values().cloned().collect();
-      let vals_csv =
-         as_csv(&vals, false).expect("Error parsing tokens for write");
-      let daterz: Vec<String> = vals_csv.split("\n").map(s).collect();
-      let rows: &Vec<String> =
-         &self.tokens.keys()
-                     .zip(daterz.iter())
-                     .map(|(k,v)| format!("{k},{v}"))
-                     .collect();
-      rows.join("\n")
-   }
-}
-
-impl CsvHeader for TokenRegistry {
-   fn header(&self) -> String { s("token,native?,address,decimals") }
 }
 
 // ----- TESTS -------------------------------------------------------
@@ -83,14 +42,32 @@ mod functional_tests {
    create_testing!("libs::tokens");
 
    run!("load_tokens_avalanche", {
-      let toks = now(load_tokens(&AVALANCHE))?;
+      let toks = now(fetch_tokens(&AVALANCHE))?;
       print_csv(&toks);
    });
 
    run!("load_tokens_binance", {
-      let toks = now(load_tokens(&BINANCE))?;
+      let toks = now(fetch_tokens(&BINANCE))?;
       print_csv(&toks);
    });
+
+   async fn run_query(prim: &str, piv: &str, amt: f32)
+         -> ErrStr<(f32, String)> {
+      let registry = fetch_tokens(&AVALANCHE).await?;
+      let swap =
+         query_swap(&AVALANCHE, &registry, prim, piv, amt, true).await?;
+      Ok((swap.amount_out, swap.router_address))
+   }
+      
+   run!("live_quote_undead_to_btc", {
+      let (amt, addy) = now(run_query("undead", "btc", 5e5))?;
+      println!("\t500000 UNDEAD -> {amt:.8} BTC right now (router: {addy})");
+   });
+
+    run!("live_quote_btc_to_undead", {
+      let (amt, addy) = now(run_query("btc", "undead", 0.005))?;
+      println!("\t0.005 BTC -> {amt:.4} UNDEAD right now (router: {addy})");
+    });
 }
 
 #[cfg(test)]
@@ -99,20 +76,20 @@ mod tests {
    use super::*;
    use libs::types::blockchains::Blockchain::*;
 
-   #[tokio::test] async fn test_load_tokens_avax_native() -> ErrStr<()> {
-      let toks = load_tokens(&AVALANCHE).await?;
+   #[tokio::test] async fn test_fetch_tokens_avax_native() -> ErrStr<()> {
+      let toks = fetch_tokens(&AVALANCHE).await?;
       assert!(toks.token("avax")?.native);
       Ok(())
    }
 
-   #[tokio::test] async fn test_load_tokens_binance_native() -> ErrStr<()> {
-      let toks = load_tokens(&BINANCE).await?;
+   #[tokio::test] async fn test_fetch_tokens_binance_native() -> ErrStr<()> {
+      let toks = fetch_tokens(&BINANCE).await?;
       assert!(toks.token("bnb")?.native);
       Ok(())
    }
 
    #[tokio::test] async fn test_btc_has_addy() -> ErrStr<()> {
-      let toks = load_tokens(&AVALANCHE).await?;
+      let toks = fetch_tokens(&AVALANCHE).await?;
       let btc_mb_addy = toks.token("btc")?.address;
       assert!(btc_mb_addy.is_some());
       btc_mb_addy.and_then(|btc_addy| {
@@ -121,4 +98,14 @@ mod tests {
       });
       Ok(())
    }
+
+    #[tokio::test] fn test_fetch_token_registry_has_btc_undead_avax()
+          -> ErrStr<()> {
+        let registry = fetch_tokens(&AVALANCHE).await?;
+        for symbol in ["BTC", "UNDEAD", "AVAX"] {
+            assert!(registry.token(symbol).is_ok(),
+                    "missing '{symbol}' in avalanche.toml");
+        }
+        Ok(())
+    }
 }

@@ -1,11 +1,9 @@
-use std::collections::HashMap;
 use clap::Parser;
 use book::{
    debug,
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   file_utils::read_file,
    string_utils::{UppercaseString, s},
 };
 use libs::types::blockchains::Blockchain;
@@ -21,7 +19,7 @@ use trading::{
       log_ts,
       append_trade_log_line
    },
-   tokens::{ TokenRegistry, load_tokens }
+   tokens::load_tokens
 };
 
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
@@ -88,7 +86,7 @@ async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault_address
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
     println!("mode {mode} token {token}");
 
-    let registry = load_tokens(blockchain)?;
+    let registry = load_tokens(blockchain).await?;
 
     let (undead_balance, token_balance) = tokio::try_join!(
         wallet_balance(vault_address, UNDEAD, &registry),

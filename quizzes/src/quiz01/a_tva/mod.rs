@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use book::{
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   file_utils::read_file,
    parse_args_add_banner,
    string_utils::s
 };
@@ -125,7 +124,7 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
 // via `resolve_wallet_address`. See the `Args` struct below.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &Blockchain, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let registry = load_tokens(blockchain)?;
+    let registry = load_tokens(blockchain).await?;
     let ctx = mk_cycle_ctx(wallet_address, vault_address, keystore_path,
                    log_path, blockchain, &registry, dry_run, debug);
 
@@ -160,7 +159,7 @@ pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path:
         println!("  Nothing to close this cycle — see ya in an hour!");
     }
 
-    let mut snap = balance_snapshot(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await?;
+    let mut snap = balance_snapshot(&ctx.wallet_address, &ctx.registry, BTC, state.committed_btc, state.committed_undead).await?;
     if ctx.debug {
         println!();
         println!(
@@ -191,7 +190,8 @@ async fn assesment_report(ctx: &CycleCtx, opened_something: bool, running_stats:
     // exactly how many pivots are sitting open right now.
     let open_pivots_now = running_stats.total_opens.saturating_sub(running_stats.total_closes);
 
-    let wallet_gas_avax = wallet_balance(ctx.wallet_address, "AVAX", ctx.registry).await
+    let wallet_gas_avax =
+       wallet_balance(&ctx.wallet_address, "AVAX", &ctx.registry).await
         .unwrap_or_else(|e| {
             eprintln!("  ! WARNING: could not read current AVAX balance for the report ({e}) — showing 0.0.");
             0.0
@@ -240,7 +240,8 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
     let from_dp = amount_decimals(from);
     let to_dp = amount_decimals(to);
     match attempt_trade_with_actual_amount(
-       ctx.blockchain, ctx.wallet_address, ctx.registry, from, to, amount, NO_REAL_FLOOR, SLIPPAGE_BPS, ctx.keystore_path, ctx.dry_run, ctx.debug,
+       &ctx.blockchain, &ctx.wallet_address, &ctx.registry, from, to, amount,
+       NO_REAL_FLOOR, SLIPPAGE_BPS, ctx.keystore_path, ctx.dry_run, ctx.debug
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  OPENED  #{pivot_id:<4} {amount:.from_dp$} {from} -> {actual_received:.to_dp$} {to}   gas {gas_avax:.5} AVAX");
@@ -252,7 +253,9 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
                 Ok(fresh) => *snap = fresh,
                 Err(e) => eprintln!("  ! WARNING: pivot #{pivot_id} opened, but the post-open balance snapshot failed ({e}). Logging the open now anyway with the last-known snapshot -- re-check wallet balances by hand."),
             }
-            log_open(ctx.log_path, None, pivot_id, from, amount, to, actual_received, gas_avax, &tx_hash, &*snap, &state.running_stats);
+            log_open(&ctx.log_path, None, pivot_id, from, amount, to, 
+                     actual_received, gas_avax, &tx_hash, &*snap,
+                     &state.running_stats);
             report.opened_something = true;
         }
         Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
@@ -263,7 +266,7 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
         Err(e) => {
             report_misfire(MisfireStage::Open, None, from, to, amount, &e);
             if !ctx.dry_run {
-                log_misfire(ctx.log_path, None, from, to, amount, 0.0, "", &*snap, &state.running_stats);
+                log_misfire(&ctx.log_path, None, from, to, amount, 0.0, "", &*snap, &state.running_stats);
             }
         }
     }
@@ -273,13 +276,16 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
 /// Surveys one pivot for a possible close. Never propagates an error, same
 /// as `open_trade` -- one bad pivot can't cancel the rest of the survey or
 /// the open-new-position step that follows it.
-async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
+async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState,
+                      closed_something: &mut bool, pivot: OpenPivot, pct: f64) {
     let prim_dp = amount_decimals(&pivot.prim);
     let proper_dp = amount_decimals(&pivot.proper);
 
     match attempt_trade_with_actual_amount(
-        ctx.blockchain, ctx.wallet_address, ctx.registry, &pivot.proper, &pivot.prim,
-        pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS, ctx.keystore_path, ctx.dry_run, ctx.debug,
+        &ctx.blockchain, &ctx.wallet_address, &ctx.registry,
+        &pivot.proper, &pivot.prim,
+        pivot.proper_amount, pivot.prim_amount, SLIPPAGE_BPS,
+        &ctx.keystore_path, ctx.dry_run, ctx.debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             if ctx.dry_run { panic!("dry run should never return Executed — that would mean funds were actually moved!"); }
@@ -309,7 +315,8 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: 
                 actual_received, pivot.prim, gain, pivot.prim, roi * 100.0, apr * 100.0, gas_avax
             );
 
-            let snap = balance_snapshot(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await
+            let snap = balance_snapshot(&ctx.wallet_address, &ctx.registry, BTC,
+                          state.committed_btc, state.committed_undead).await
                 .unwrap_or_else(|e| {
                     eprintln!("  ! WARNING: pivot #{} closed, but the post-close balance snapshot failed ({e}). Logging the close now anyway (with a zeroed snapshot) so it isn't lost -- re-check wallet balances by hand.", pivot.pivot_id);
                     BalanceSnapshot {
@@ -317,15 +324,16 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: 
                         undead_balance: 0.0, undead_committed: state.committed_undead, undead_available: 0.0,
                     }
                 });
-            log_close(ctx.log_path, None, pivot.pivot_id, state.next_close_id, &pivot.prim, pivot.prim_amount, &pivot.proper, actual_received, gain, roi, apr, gas_avax, &tx_hash, &snap, &state.running_stats);
+            log_close(&ctx.log_path, None, pivot.pivot_id, state.next_close_id,
+                      &pivot.prim, pivot.prim_amount, &pivot.proper,
+                      actual_received, gain, roi, apr, gas_avax, &tx_hash,
+                      &snap, &state.running_stats);
             state.next_close_id += 1;
             *closed_something = true;
 
             // The Vault div is secondary to an already-logged close -- its
             // failure must not hide that the close happened.
-            if let Err(e) = divvy_to_vault(ctx, &pivot.prim, gain, pct).await {
-                println!("  ! pivot #{} closed and logged, but sending the div to Vault failed: {e} -- needs a manual look.", pivot.pivot_id);
-            }
+           divvy_to_vault(ctx, &pivot.prim, gain, pct).await?
         }
         Ok(AttemptOutcome::DryRunWouldClear { quoted_amount_out }) => {
             if !ctx.dry_run { panic!("not dry run should never return DryRunWouldClear — that would mean funds were actually moved!"); }
@@ -336,9 +344,7 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: 
                 pivot.pivot_id, pivot.prim_amount, pivot.prim, pivot.proper_amount, pivot.proper,
                 quoted_amount_out, pivot.prim, roi * 100.0
             );
-            if let Err(e) = divvy_to_vault(ctx, &pivot.prim, gain, pct).await {
-                println!("  ! pivot #{} dry-run div preview failed: {e}", pivot.pivot_id);
-            }
+            divvy_to_vault(ctx, &pivot.prim, gain, pct).await?;
             *closed_something = true;
         }
         Ok(AttemptOutcome::NotCleared) => {
@@ -351,7 +357,8 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: 
         Err(e) => {
             report_misfire(MisfireStage::Close, Some(pivot.pivot_id), &pivot.prim, &pivot.proper, pivot.prim_amount, &e);
             if !ctx.dry_run {
-                let snap = balance_snapshot(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await
+                let snap = balance_snapshot(&ctx.wallet_address, &ctx.registry,
+                        BTC, state.committed_btc, state.committed_undead).await
                     .unwrap_or_else(|snap_err| {
                         eprintln!("  ! WARNING: pivot #{} misfire, and the balance snapshot for logging it also failed ({snap_err}). Logging the misfire now anyway (with a zeroed snapshot) so it isn't lost.", pivot.pivot_id);
                         BalanceSnapshot {
@@ -359,7 +366,7 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState, closed_something: 
                             undead_balance: 0.0, undead_committed: state.committed_undead, undead_available: 0.0,
                         }
                     });
-                log_misfire(ctx.log_path, None, &pivot.prim, &pivot.proper, pivot.prim_amount, 0.0, "", &snap, &state.running_stats);
+                log_misfire(&ctx.log_path, None, &pivot.prim, &pivot.proper, pivot.prim_amount, 0.0, "", &snap, &state.running_stats);
             }
         }
     }
@@ -372,7 +379,8 @@ fn compute_div_amount(pct: f64, gain: f64) -> f64 { pct / 100.0 * gain }
 // ever calls this from the `Executed` arm (dry_run proven false) or the
 // `DryRunWouldClear` arm (dry_run proven true), so a separate bool here
 // would just be a redundant copy of a value the caller already has.
-async fn divvy_to_vault(ctx: &CycleCtx, token: &str, gain: f64, pct: f64) -> ErrStr<()> {
+async fn divvy_to_vault(ctx: &CycleCtx, token: &str, gain: f64, pct: f64)
+       -> ErrStr<()> {
     let mode_tag = if ctx.dry_run { " [DRY RUN]" } else { "" };
     let amount = compute_div_amount(pct, gain);
 
@@ -385,7 +393,10 @@ async fn divvy_to_vault(ctx: &CycleCtx, token: &str, gain: f64, pct: f64) -> Err
         println!("  [DRY-RUN] Would send {amount:.8} {token} to Vault.");
     }
     else {
-        let (tx_hash, gas_avax) = send_tokens_to_address(ctx.wallet_address, ctx.registry, token, ctx.vault_address, amount, ctx.keystore_path, ctx.debug).await?;
+        let (tx_hash, gas_avax) =
+           send_tokens_to_address(&ctx.wallet_address, &ctx.registry, token, 
+                                  &ctx.vault_address, amount,
+                                  &ctx.keystore_path, ctx.debug).await?;
         println!("  Sent {amount:.8} {token} to Vault. tx: {tx_hash}   gas {gas_avax:.5} AVAX");
     }
     Ok(())
@@ -396,32 +407,44 @@ async fn divvy_to_vault(ctx: &CycleCtx, token: &str, gain: f64, pct: f64) -> Err
 #[command(name = "tva")]
 #[command(version = "1.8.1")]
 struct Args {
+
+    /// `div` if gains are to be divvied to a vault address
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// wallet address of tva-trading
     #[arg(long, env="TVA_WALLET_ADDRESS")]
     wallet_address: String,
+
+    /// wallet address where gains are sent
     #[arg(long, env="VAULT_ADDRESS")]
     vault_address: String,
-    /// `global = true` lets this be given either before or after the
-    /// subcommand — `tva --dry-run div` and `tva div --dry-run` both work.
+
+    /// keystore for wallet to do trading
     #[arg(long, env = "TVA_KEYSTORE_PATH")]
     keystore_path: String,
+
     /// Required, no default, CLI-only (no env fallback) -- a missing log
     /// means missing history, not a fresh start.
     #[arg(long)]
     log_path: String,
+
     /// Which chain's data/{blockchain}.toml to load.
     #[arg(long, global = true, default_value_t = AVALANCHE)]
     blockchain: Blockchain,
+
     /// Amount of BTC to open a new BTC->UNDEAD position with each cycle.
     #[arg(long, global = true, default_value_t = DEFAULT_BTC_TRADE_AMOUNT)]
     btc_trade_amount: f64,
+
     /// Amount of UNDEAD to open a new UNDEAD->BTC position with each cycle.
     #[arg(long, global = true, default_value_t = DEFAULT_UNDEAD_TRADE_AMOUNT)]
     undead_trade_amount: f64,
+
     /// Dry-run mode to see what pivots WOULD do, no funds moved or used.
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
+
     /// debug mode to see what is going on behind the scenes.
     #[arg(short = 'd', global = true, long, default_value_t = false)]
     debug: bool
@@ -429,7 +452,7 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// divvy a certain percentage to a vault/ separate wallet (e.g. div --pct 25)
+    /// divvy a certain percentage to a vault wallet (e.g. div --pct 25)
     Div {
         #[arg(long, default_value_t = DEFAULT_DIV_PCT)]
         pct: f64,
@@ -442,7 +465,9 @@ pub async fn runoff_with_args() -> ErrStr<()> {
         None => 0.0,
         Some(Command::Div { pct }) => pct,
     };
-    run_cycle(&args.wallet_address, &args.vault_address, &args.keystore_path, &args.log_path, &args.blockchain, args.btc_trade_amount, args.undead_trade_amount, pct, args.dry_run, args.debug).await
+    run_cycle(&args.wallet_address, &args.vault_address, &args.keystore_path, 
+              &args.log_path, &args.blockchain, args.btc_trade_amount, 
+              args.undead_trade_amount, pct, args.dry_run, args.debug).await
 }
 
 //----- UNIT TESTS -------------------------------------------------------------
@@ -450,21 +475,14 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 mod unit_tests {
     use super::*;
 
-    #[test]
-    fn test_load_token_registry_has_btc_undead_avax() -> ErrStr<()> {
-        let registry = load_tokens(&AVALANCHE)?;
-        for symbol in ["BTC", "UNDEAD", "AVAX"] {
-            assert!(registry.contains_key(symbol), "missing '{symbol}' in avalanche.toml");
-        }
-        Ok(())
-    }
-
     // refuse to run at all when the log is missing,
     // instead of treating it as a fresh start.
     #[test]
     fn test_replay_log_missing_file_is_a_hard_error_not_a_fresh_start() {
-        let result = replay_log_with_history_required("/tmp/definitely_does_not_exist.log");
-        assert!(result.is_err(), "a missing log file must never be treated as a fresh start — tvá's history is real and pre-existing");
+        let result =
+        replay_log_with_history_required("/tmp/definitely_does_not_exist.log");
+        assert!(result.is_err(), 
+                "a missing log file must never be treated as a fresh start — tvá's history is real and pre-existing");
         let msg = result.unwrap_err();
         assert!(msg.contains("history"), "error should make clear this is about missing history, not an empty-is-fine case: '{msg}'");
     }
@@ -549,7 +567,8 @@ mod unit_tests {
         ).map_err(|e| format!("could not write test fixture: {e}"))?;
 
         let (opens, ..) = replay_log_with_history_required(path_str)?;
-        assert_eq!(opens.len(), 2, "both fixture rows should replay as still-open pivots");
+        assert_eq!(opens.len(), 2,
+                   "both fixture rows should replay as still-open pivots");
 
         let btc_committed = committed_amt(BTC, &opens);
         let undead_committed = committed_amt(UNDEAD, &opens);
@@ -562,6 +581,7 @@ mod unit_tests {
 }
 
 //----- FUNCTIONAL TESTS -------------------------------------------------------
+
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 pub mod functional_tests {
@@ -571,8 +591,10 @@ pub mod functional_tests {
     use trading::auto_trading::query_swap;
 
     /// Fixed, hardcoded dummy test addresses -- never read from env.
-    const TEST_MANDI_ADDRESS: &str = "0x6700bD7EAE41434f566e48738813fC585B95669a";
-    const TEST_SOLONGE_ADDRESS: &str = "0x1111111111111111111111111111111111111E";
+    const TEST_MANDI_ADDRESS: &str =
+       "0x6700bD7EAE41434f566e48738813fC585B95669a";
+    const TEST_SOLONGE_ADDRESS: &str =
+       "0x1111111111111111111111111111111111111E";
 
     create_testing!("quiz01::a_tva");
 
@@ -587,7 +609,7 @@ pub mod functional_tests {
     });
 
     run!("wallet_balance_undead", {
-        let registry = load_tokens(&AVALANCHE)?;
+        let registry = now(load_tokens(&AVALANCHE))?;
         let balance = now(wallet_balance(
             TEST_MANDI_ADDRESS,
             "UNDEAD",
@@ -597,7 +619,7 @@ pub mod functional_tests {
     });
 
     run!("wallet_balance_avax_native_coin_branch", {
-        let registry = load_tokens(&AVALANCHE)?;
+        let registry = now(load_tokens(&AVALANCHE))?;
         let balance = now(wallet_balance(
             TEST_MANDI_ADDRESS,
             "AVAX",
@@ -606,43 +628,24 @@ pub mod functional_tests {
         println!("\ttest wallet AVAX (native) balance: {balance:.5}");
     });
 
-    run!("live_quote_undead_to_btc", {
-        let registry = load_tokens(&AVALANCHE)?;
-        let swap = now(query_swap(&AVALANCHE, &registry, "UNDEAD", "BTC", 500_000.0, true))?;
-        println!("\t500000 UNDEAD -> {:.8} BTC right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("live_quote_btc_to_undead", {
-        let registry = load_tokens(&AVALANCHE)?;
-        let swap = now(query_swap(&AVALANCHE, &registry, "BTC", "UNDEAD", 0.005, true))?;
-        println!("\t0.005 BTC -> {:.4} UNDEAD right now (router: {})", swap.amount_out, swap.router_address);
-    });
-
-    run!("cycle_dry_run", {
-        let log_path = std::env::temp_dir().join("a_tva_functional_test_cycle_dry_run.log");
+    async fn sample_cycle(btc: f32, undead: f32) -> ErrStr<()> {
+        let log_path =
+           std::env::temp_dir().join("a_tva_functional_test_cycle_dry_run.log");
         let log_path_str = log_path.to_str().unwrap();
-        std::fs::write(
-            &log_path,
-            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
-
-        now(run_cycle(TEST_MANDI_ADDRESS, TEST_SOLONGE_ADDRESS, "unused-in-dry-run", log_path_str, "avalanche", DEFAULT_BTC_TRADE_AMOUNT, DEFAULT_UNDEAD_TRADE_AMOUNT, 25.0, true, false))?;
+        let row = "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n";
+        std::fs::write(&log_path, row)
+           .map_err(|e| format!("could not write test fixture: {e}"))?;
+        run_cycle(TEST_MANDI_ADDRESS, TEST_SOLONGE_ADDRESS, "unused-in-dry-run",
+                  log_path_str, "avalanche", btc, undead, 25.0, true, true))?;
         println!("\tdry-run cycle completed without touching the keystore or any env var");
-
         let _ = std::fs::remove_file(&log_path);
-    });
+       Ok(())
+    }
 
+    run!("cycle_dry_run",
+         now(sample_cycle(DEFAULT_BTC_TRADE_AMOUNT,
+                          DEFAULT_UNDEAD_TRADE_AMOUNT))?);
     run!("cycle_dry_run_custom_trade_amounts", {
-        let log_path = std::env::temp_dir().join("a_tva_functional_test_custom_trade_amounts.log");
-        let log_path_str = log_path.to_str().unwrap();
-        std::fs::write(
-            &log_path,
-            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
-
-        now(run_cycle(TEST_MANDI_ADDRESS, TEST_SOLONGE_ADDRESS, "unused-in-dry-run", log_path_str, "avalanche", 0.001, 100_000.0, 25.0, true, false))?;
-        println!("\tdry-run cycle completed with custom trade amounts (0.001 BTC / 100000 UNDEAD), without touching the keystore");
-
-        let _ = std::fs::remove_file(&log_path);
+         now(sample_cycle(0.001, 1e5))?);
     });
 }

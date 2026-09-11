@@ -3,12 +3,12 @@ use book::{
    debug,
    parse_args_add_banner,
    err_utils::ErrStr,
-   file_utils::read_file,
    string_utils::UppercaseString,
    cli_utils::generate_banner,
 };
-use libs::types::blockchains::Blockchain;
+use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
+   addresses::is_valid_evm_address,
    auto_trading::{
       wallet_balance,
       send_tokens_to_address,
@@ -16,96 +16,81 @@ use trading::{
       log_ts,
       append_trade_log_line
    },
-   tokens::{ TokenRegistry, load_tokens }
+   tokens::load_tokens
 };
 
-//============================================================================
-// ----- const ----------------------------------------------------------------
-//============================================================================
+//======================================================
+// ----- const -----------------------------------------
+//======================================================
 const DUST_EPSILON: f64 = 1e-8;
-const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/sendan-sends.log");
-const TRADE_LOG_HEADER: &str = "timestamp\tmode\tblockchain\ttoken\tamount\tto_address\toutcome\tactual_sent\tgas_avax\ttx_hash";
 
-/// `0x` followed by exactly 40 hex characters -- no checksum validation,
-/// just enough of a shape check to catch a fat-fingered or truncated
-/// address before it gets baked into ERC-20 transfer calldata, where a
-/// malformed address would otherwise fail silently (or worse, resolve to
-/// some other real address) instead of erroring up front.
-fn is_valid_evm_address(address: &str) -> bool {
-    match address.strip_prefix("0x") {
-        Some(hex) => hex.len() == 40 && hex.chars().all(|c| c.is_ascii_hexdigit()),
-        None => false,
-    }
-}
-//=========================================================================================
-// ----- CLI --------------------------------------------------------------------------------
-//=========================================================================================
+//======================================================
+// ----- CLI -------------------------------------------
+//======================================================
+
 /// sendan (Old English: "to send") -- a one-shot ERC-20 transfer, e.g.
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
 #[command(name = "sendan", version = "1.0.1")]
 struct Args {
-    /// Blockchain to send on; must match a `data/<blockchain>.toml` file. e.g. `avalanche`
-    blockchain: Blockchain,
-    /// Amount of `token` to send, in human units (not wei/base units). e.g. `1100`
-    amount: f64,
     /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
     token: UppercaseString,
+
+    /// Amount of `token` to send. e.g. `1100`
+    amount: f64,
+
     /// Destination address: `0x` followed by 40 hex characters. e.g. `0x1234567890abcdef1234567890abcdef12345678`
     to_address: String,
+
+    /// Blockchain to send on; must match a `data/<blockchain>.toml` file
+    #[arg(long, default_value_t=AVALANCHE)]
+    blockchain: Blockchain,
+
     /// Wallet address to send from. e.g. `0xabc0000000000000000000000000000000000123`
     #[arg(long, env = "WALLET_ADDRESS")]
     wallet_address: String,
-    /// Path to the encrypted keystore file used to sign the transaction. e.g. `/home/user/.keystore/wallet.json`
+
+    /// Path to the encrypted keystore file used to sign the transaction
     #[arg(long, env = "KEYSTORE_PATH")]
     keystore_path: String,
-    /// Simulate the send without broadcasting a transaction. e.g. `--dry-run`
+
+    /// Simulate the send without broadcasting a transaction
     #[arg(long, default_value_t = false)]
     dry_run: bool,
-    /// Print verbose debug logging. e.g. `-d` or `--debug`
+
+    /// Print verbose debug logging
     #[arg(short = 'd', long, default_value_t = true)]
     debug: bool
 }
 
-#[allow(clippy::too_many_arguments)]
-fn log_send(
-    mode: &str, blockchain: &str, token: &str, amount: f64, to_address: &str,
-    outcome: &str, actual_sent: f64, gas_avax: f64, tx_hash: &str,
-) {
-    let line = format!(
-        "{}\t{mode}\t{blockchain}\t{token}\t{amount:.8}\t{to_address}\t{outcome}\t{actual_sent:.8}\t{gas_avax:.8}\t{tx_hash}",
-        log_ts(now_ts())
-    );
-    append_trade_log_line(TRADE_LOG_PATH, &line, Some(TRADE_LOG_HEADER));
-}
+//=======================================================================
+// ----- SEND FN --------------------------------------------------------
+//=======================================================================
 
-//========================================================================================
-// ----- SEND FN ---------------------------------------------------------------------------
-//========================================================================================
 #[allow(clippy::too_many_arguments)]
 async fn sendan_continuation(
-    blockchain: &Blockchain, amount: f64, token: &str, to_address: &str,
-    wallet_address: &str, keystore_path: &str, dry_run: bool, debug: bool,
-) -> ErrStr<()> {
+    blockchain: &Blockchain, amount: f64, token: &str, to: &str,
+    wallet_address: &str, keystore_path: &str, dry_run: bool, debug: bool)
+         -> ErrStr<()> {
     debug!("sendan_continuation", debug);
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
-    println!("mode {mode} send {amount:.8} {token} -> {to_address}");
+    println!("mode {mode} send {amount:.8} {token} -> {to}");
 
     if amount <= DUST_EPSILON {
         return Err(format!("sendan: amount must be positive, got {amount}"));
     }
-    if !is_valid_evm_address(to_address) {
+    if !is_valid_evm_address(to) {
         return Err(format!(
-            "'{to_address}' doesn't look like an EVM address -- expected '0x' followed by 40 hex characters."
+            "'{to}' doesn't look like an EVM address -- expected '0x' followed by 40 hex characters."
         ));
     }
 
-    let registry = load_tokens(&blockchain)?;
+    let registry = load_tokens(&blockchain).await?;
 
     // fail fast on an unknown/native token before spending an RPC call on
     // a balance check we already know can't lead anywhere.
-    let entry = token_entry(&registry, token)?;
+    let entry = registry.token(token)?;
     if entry.address.is_none() {
         return Err(format!(
             "'{token}' has no address in data/{blockchain}.toml -- sendan only sends ERC-20s, not the native coin."
@@ -124,21 +109,18 @@ async fn sendan_continuation(
 
     if dry_run {
         println!("  WOULD SEND  {amount:.8} {token} -> {to_address}");
-        log_send(mode, blockchain, token, amount, to_address, "WOULD_SEND", amount, 0.0, "");
         return Ok(());
     }
 
     match send_tokens_to_address(
-        wallet_address, &registry, token, to_address, amount, keystore_path, debug,
-    ).await {
+        wallet_address, &registry, token, to, amount, keystore_path, debug)
+    .await {
         Ok((tx_hash, gas_avax)) => {
             println!("  SENT  {amount:.8} {token} -> {to_address}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
-            log_send(mode, blockchain, token, amount, to_address, "SENT", amount, gas_avax, &tx_hash);
             Ok(())
         }
         Err(e) => {
             println!("  ! send failed, no funds moved: {e}");
-            log_send(mode, blockchain, token, amount, to_address, &format!("FAILED: {e}"), 0.0, 0.0, "");
             Err(e)
         }
     }
@@ -152,43 +134,14 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     ).await
 }
 
-//==========================================================================================
-// ----- UNIT TESTS --------------------------------------------------------------------------
-//==========================================================================================
+//=========================================================
+// ----- UNIT TESTS ---------------------------------------
+//=========================================================
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use book::utils::now;
     use libs::types::blockchains::Blockchain::AVALANCHE;
-
-    #[test]
-    fn test_load_token_registry_has_undead_avax() -> ErrStr<()> {
-        let registry = load_tokens(&AVALANCHE)?;
-        for symbol in ["UNDEAD", "AVAX"] {
-            assert!(registry.contains_key(symbol), "missing '{symbol}' in tokens.toml");
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_valid_evm_address_accepts_well_formed_address() {
-        assert!(is_valid_evm_address("0x00000000000000000000000000000000000000AB"));
-    }
-
-    #[test]
-    fn test_valid_evm_address_rejects_missing_0x() {
-        assert!(!is_valid_evm_address("000000000000000000000000000000000000AB"));
-    }
-
-    #[test]
-    fn test_valid_evm_address_rejects_wrong_length() {
-        assert!(!is_valid_evm_address("0x1234567891011131314151617181920"));
-    }
-
-    #[test]
-    fn test_valid_evm_address_rejects_non_hex_characters() {
-        assert!(!is_valid_evm_address("0xZZ00000000000000000000000000000000000A"));
-    }
 
     #[test]
     fn test_sendan_continuation_rejects_zero_amount() {
@@ -206,9 +159,11 @@ mod unit_tests {
         assert!(result.is_err(), "a malformed destination must never reach the wallet-balance check");
     }
 }
-//============================================================================================
-// ----- FUNCTIONAL TEST -----------------------------------------------------------------------
-//============================================================================================
+
+// =======================================================
+// ----- FUNCTIONAL TEST ---------------------------------
+//========================================================
+
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 mod functional_tests {
@@ -219,26 +174,15 @@ mod functional_tests {
 
     create_testing!("quiz01::d_sendan");
 
-    run!("wallet_balance_undead", {
-        let registry = load_tokens(&AVALANCHE)?;
-        let balance = now(wallet_balance(
-            "0x123",
-            "UNDEAD",
-            &registry,
-        ))?;
-        println!("\ttest wallet UNDEAD balance: {balance:.8}");
-    });
-
     run!("sendan_dry_run_rejects_bad_address", {
         let result = now(sendan_continuation(
-            "avalanche", 1.0, "UNDEAD", "not-an-address", "0x123", "", true, false,
-        ));
+            AVALANCHE, 1.0, "UNDEAD", "not-address", "0x123", "", true, false));
         assert!(result.is_err());
         println!("sendan is ok");
     });
 
-    run!("sendan_functionality", {
-        let registry = load_tokens(&AVALANCHE)?;
+    run!("sendan", {
+        let registry = now(load_tokens(&AVALANCHE))?;
         let balance = now(wallet_balance("0x123", "UNDEAD", &registry))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
         if balance <= DUST_EPSILON {
