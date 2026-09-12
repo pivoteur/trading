@@ -503,19 +503,7 @@ pub async fn approve_exact_amount(
     let to = err_or(Address::from_str(token_contract), "Bad token address")?;
     let data = err_or(Bytes::from_str(&data_hex), "Bad approve calldata")?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
-    let pending = err_or(client.send_transaction(tx, None).await,
-                         "Approve transaction failed to send")?;
-    log!("Approve tx submitted: {:?}", pending.tx_hash());
-
-    let receipt = err_or(pending.await,
-                         "Approve transaction failed while confirming")?;
-    match receipt {
-        Some(r) => {
-            log!("Approve confirmed in block {:?}", r.block_number);
-            Ok(gas_cost_avax(r.gas_used, r.effective_gas_price))
-        }
-        None => Err(s("Approve transaction was dropped or replaced"))
-    }
+    complete_transaction(client, tx, "approve", false, verbose).await
 }
 
 /// Asks KyberSwap to encode the actual swap calldata for the route.
@@ -581,23 +569,37 @@ pub async fn send_swap_tx(
     let data =
          err_or(Bytes::from_str(calldata_hex), "Bad calldata from KyberSwap")?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
+    complete_transaction(client, tx, "swap", true, verbose).await
+}
 
+async fn complete_transaction(
+        client: &SignerMiddleware<Provider<Http>, LocalWallet>,
+        tx: Eip1559TransactionRequest, tx_type: &str, check_status: bool,
+        verbose: bool) -> ErrStr<f64> {
+    debug!(format!("complete_{tx_type}_transaction"), verbose);
     let pending = err_or(client.send_transaction(tx, None).await,
-                         "Swap transaction failed to send")?;
-    let tx_hash = format!("{:?}", pending.tx_hash());
-    log!("Swap tx submitted: {}", tx_hash);
+                         &format!("{tx_type} transaction failed to send"))?;
+    let tx_hash = pending.tx_hash();
+    log!("{} tx submitted: {:?}", tx_type, tx_hash);
 
-    let receipt = err_or(pending.await, 
-                         "Swap transaction failed while confirming")?;
+    let receipt =
+       err_or(pending.await,
+              &format!("{tx_type} transaction failed while confirming"))?;
     match receipt {
-        Some(r) if r.status == Some(1.into()) => {
-            log!("Swap confirmed in block {:?}", r.block_number);
-            Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
-        },
-        Some(_) =>
-           Err(format!("Swap transaction REVERTED on-chain. Hash: {tx_hash}")),
-        None =>
-           Err(format!("Swap transaction was dropped or replaced. Hash: {tx_hash}"))
+        Some(r) => {
+            fn ok(tx: &str, s: ()) -> ErrStr<f64> {
+               log!("{} confirmed in block {:?}", tx, s.block_number);
+               Ok(gas_cost_avax(s.gas_used, s.effective_gas_price))
+            }
+            if !check_state || r.status == Some(1.into()) {
+               ok(tx_type, r)
+            } else {
+               Err(format!("{tx_type} transaction REVERTED on-chain.
+Hash: {tx_hash}"))
+            }
+        }
+        None => Err(format!("{tx_type} transaction was dropped or replaced.
+Hash: {tx_hash}"))
     }
 }
 
@@ -645,20 +647,7 @@ async fn send_tokens(blockchain: &Blockchain,
     let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
     log!("On its way — courier's en route...");
-    let pending = err_or(client.send_transaction(tx, None).await,
-                         "Transfer transaction failed to send")?;
-    let tx_hash = format!("{:?}", pending.tx_hash());
-    log!("Transfer tx submitted: {}", tx_hash);
-    let receipt = err_or(pending.await,
-                         "Transfer transaction failed while confirming")?;
-    match receipt {
-        Some(r) if r.status == Some(1.into()) => {
-            log!("Transfer confirmed in block {:?}", r.block_number);
-            Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
-        },
-        Some(_) => Err(format!("Transfer transaction REVERTED on-chain. Hash: {tx_hash}")),
-        None => Err(format!("Transfer transaction was dropped or replaced. Hash: {tx_hash}"))
-    }
+    complete_transaction(client, tx, "transfer", true, verbose).await
 }
 
 //============================================================================
