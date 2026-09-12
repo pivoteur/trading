@@ -4,7 +4,7 @@ use std::{
    str::FromStr
 };
 use serde::Deserialize;
-use serde_json::{ Value, from_str };
+use serde_json::{ Value, from_str, json };
 
 use book::{
     debug,
@@ -245,8 +245,7 @@ pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats
         return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
     }
 
-    let lines = lines_from_file(path)
-        .map_err(|e| format!("Could not open trade log at '{path}': {e}"))?;
+    let lines = lines_from_file(path)?;
 
     let mut open_by_id: HashMap<Id, OpenPivot> = HashMap::new();
     let mut max_pivot_id: Id = 0;
@@ -439,19 +438,22 @@ pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
                          keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
         Ok(pw) => pw,
-        Err(_) => rpassword::prompt_password("Keystore password: ")
-            .map_err(|e| format!("Could not read password: {e}. No funds moved."))?,
+        Err(_) => err_or(rpassword::prompt_password("Keystore password: "),
+                         "Could not read password. No funds moved.")?
     };
-    let wallet = LocalWallet::decrypt_keystore(&keystore_path, &password)
-        .map_err(|e| format!("Could not decrypt keystore, path {keystore_path}: {e}. No funds moved."))?
-        .with_chain_id(blockchain.chain_id());
+    let wallet =
+       err_or(LocalWallet::decrypt_keystore(&keystore_path, &password),
+              &format!("Could not decrypt keystore, path {keystore_path}.
+No funds moved."))?
+             .with_chain_id(blockchain.chain_id());
     let derived = format!("{:?}", wallet.address());
     if !derived.eq_ignore_ascii_case(expected_address) {
-        return Err(format!(
-            "Keystore address ({derived}) does not match expected address ({expected_address}) — refusing to proceed. No funds moved."
-        ));
+        Err(format!("Keystore address ({derived}) does not match expected
+address ({expected_address}) — refusing to proceed. No funds moved."
+        ))
+    } else {
+       Ok(wallet)
     }
-    Ok(wallet)
 }
 
 /// Builds an EIP-1559 tx with a buffered max fee (so a base-fee bump between
@@ -459,70 +461,57 @@ pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
 /// get the tx rejected pre-mempool) and a buffered gas limit. Fees are
 /// re-estimated fresh on every call rather than reused across steps.
 async fn build_tx_with_fee_buffer(
-    client: &SignerMiddleware<Provider<Http>, LocalWallet>,
-    to: Address,
-    data: Bytes,
-) -> ErrStr<Eip1559TransactionRequest> {
-    let (max_fee, max_priority_fee) = client
-        .estimate_eip1559_fees(None)
-        .await
-        .map_err(|e| format!("Could not estimate EIP-1559 fees: {e}"))?;
-
+        client: &SignerMiddleware<Provider<Http>, LocalWallet>, to: Address,
+        data: Bytes) -> ErrStr<Eip1559TransactionRequest> {
+    let (max_fee, max_priority_fee) =
+       err_or(client.estimate_eip1559_fees(None).await,
+              "Could not estimate EIP-1559 fees")?;
     // 30% buffer on the max fee absorbs a base-fee bump between estimation
     // and submission without overpaying on the priority fee.
-    let buffered_max_fee = max_fee.saturating_mul(U256::from(130)) / U256::from(100);
-
-    let mut tx = Eip1559TransactionRequest::new()
+    let buffered_max_fee =
+       max_fee.saturating_mul(U256::from(130)) / U256::from(100);
+    let tx = Eip1559TransactionRequest::new()
         .to(to)
         .data(data)
         .max_fee_per_gas(buffered_max_fee)
         .max_priority_fee_per_gas(max_priority_fee);
 
     let typed: TypedTransaction = tx.clone().into();
-    let gas_estimate = client
-        .estimate_gas(&typed, None)
-        .await
-        .map_err(|e| format!("Could not estimate gas limit: {e}"))?;
-    // 20% buffer on gas so a slightly-off estimate doesn't run out mid-execution.
-    let buffered_gas = gas_estimate.saturating_mul(U256::from(120)) / U256::from(100);
-    tx = tx.gas(buffered_gas);
-
-    Ok(tx)
+    let gas_estimate = err_or(client.estimate_gas(&typed, None).await,
+                              "Could not estimate gas limit")?;
+    // 20% buffer on gas so slightly-off estimate doesn't run out mid-execution.
+    let buffered_gas =
+       gas_estimate.saturating_mul(U256::from(120)) / U256::from(100);
+    Ok(tx.gas(buffered_gas))
 }
 
 /// Approves the router for EXACTLY this trade's amount — never a standing
 /// allowance. The router can never pull more than what's approved here.
 pub async fn approve_exact_amount(
-    client: &SignerMiddleware<Provider<Http>, LocalWallet>,
-    token_contract: &str,
-    spender: &str,
-    amount_base_units: u128,
-    verbose: bool,
-) -> ErrStr<f64> {
+        client: &SignerMiddleware<Provider<Http>, LocalWallet>,
+        token_contract: &str,
+        spender: &str,
+        amount_base_units: u128,
+        verbose: bool) -> ErrStr<f64> {
+    debug!("approve_exact_amount", verbose);
+
     let data_hex = format!(
         "0x095ea7b3{}{}",
         pad_address_for_call(spender),
         pad_u256_for_call(amount_base_units)
     );
-    let to = Address::from_str(token_contract)
-                     .map_err(|e| format!("Bad token address: {e}"))?;
-    let data = Bytes::from_str(&data_hex)
-                     .map_err(|e| format!("Bad approve calldata: {e}"))?;
+    let to = err_or(Address::from_str(token_contract), "Bad token address")?;
+    let data = err_or(Bytes::from_str(&data_hex), "Bad approve calldata")?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
-
     let pending = err_or(client.send_transaction(tx, None).await,
                          "Approve transaction failed to send")?;
-    if verbose {
-        println!("    Approve tx submitted: {:?}", pending.tx_hash());
-    }
+    log!("Approve tx submitted: {:?}", pending.tx_hash());
 
     let receipt = err_or(pending.await,
                          "Approve transaction failed while confirming")?;
     match receipt {
         Some(r) => {
-            if verbose {
-                println!("    Approve confirmed in block {:?}", r.block_number);
-            }
+            log!("Approve confirmed in block {:?}", r.block_number);
             Ok(gas_cost_avax(r.gas_used, r.effective_gas_price))
         }
         None => Err(s("Approve transaction was dropped or replaced"))
@@ -534,51 +523,46 @@ pub async fn approve_exact_amount(
 /// trusting it — otherwise that's a screen-filling blob of hex calldata,
 /// so it stays silent by default. `slippage_bps` is basis points (e.g.
 /// 50 = 0.50%).
-pub async fn kyberswap_build(
-    blockchain: &Blockchain,
-    route_summary_raw: &serde_json::Value,
-    sender: &str,
-    slippage_bps: u16,
-    verbose: bool,
-) -> ErrStr<(String, String)> {
-    let body = serde_json::json!({
+pub async fn kyberswap_build(blockchain: &Blockchain, route_summary_raw: &Value,
+                             sender: &str, slippage_bps: u16, verbose: bool)
+      -> ErrStr<(String, String)> {
+    debug!("kyberswap_build", verbose);
+    let body = json!({
         "routeSummary": route_summary_raw,
         "sender": sender,
         "recipient": sender,
         "slippageTolerance": slippage_bps
     });
 
-    let resp = http_client()?
+    let resp = err_or(http_client()?
         .post(format!("{}/route/build", api_url(blockchain)))
         .header("X-Client-Id", "pivoteur-autotrader")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
-        .await
-        .map_err(|e| format!("KyberSwap build request failed: {e}"))?;
+        .await,
+        "KyberSwap build request failed")?;
 
     let status = resp.status();
-    let raw_body = resp.text().await.map_err(|e| format!("Could not read build response: {e}"))?;
-    if verbose {
-        println!("    KyberSwap build response (verify this looks right):\n    {raw_body}");
-    }
-
-    let parsed: serde_json::Value = serde_json::from_str(&raw_body).map_err(|e| {
-        format!("KyberSwap build response did not parse (HTTP {status}): {e}\nRaw body: {raw_body}")
-    })?;
+    let raw_body = err_or(resp.text().await, "Could not read build response")?;
+    log!("KyberSwap build response (verify this looks right)");
+    log!("{}", raw_body);
+    let parsed: Value = err_or(from_str(&raw_body),
+        &format!("KyberSwap build response did not parse (HTTP {status})
+Raw body: {raw_body}"))?;
     let data = parsed
         .get("data")
-        .ok_or_else(|| format!("Build response has no data. Raw: {raw_body}"))?;
+        .ok_or(format!("Build response has no data. Raw: {raw_body}"))?;
     let router = data
         .get("routerAddress")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Build response missing routerAddress. Raw: {raw_body}"))?
+        .ok_or(format!("Build response missing routerAddress. Raw: {raw_body}"))?
         .to_string();
     let calldata = data
         .get("data")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("Build response missing calldata. Raw: {raw_body}"))?
+        .ok_or(format!("Build response missing calldata. Raw: {raw_body}"))?
         .to_string();
 
     Ok((router, calldata))
@@ -588,36 +572,32 @@ pub async fn kyberswap_build(
 /// hard errors on revert, drop, or replacement rather than reporting a
 /// false success. To see it: snowtrace.io/tx/<tx_hash>
 pub async fn send_swap_tx(
-    client: &SignerMiddleware<Provider<Http>, LocalWallet>,
-    router: &str,
-    calldata_hex: &str,
-    verbose: bool,
-) -> ErrStr<(String, f64)> {
-    let to = Address::from_str(router).map_err(|e| format!("Bad router address: {e}"))?;
-    let data = Bytes::from_str(calldata_hex).map_err(|e| format!("Bad calldata from KyberSwap: {e}"))?;
+        client: &SignerMiddleware<Provider<Http>, LocalWallet>,
+        router: &str,
+        calldata_hex: &str,
+        verbose: bool) -> ErrStr<(String, f64)> {
+    debug!("send_swap_tx", verbose);
+    let to = err_or(Address::from_str(router), "Bad router address")?;
+    let data =
+         err_or(Bytes::from_str(calldata_hex), "Bad calldata from KyberSwap")?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
 
-    let pending = client
-        .send_transaction(tx, None)
-        .await
-        .map_err(|e| format!("Swap transaction failed to send: {e}"))?;
+    let pending = err_or(client.send_transaction(tx, None).await,
+                         "Swap transaction failed to send")?;
     let tx_hash = format!("{:?}", pending.tx_hash());
-    if verbose {
-        println!("    Swap tx submitted: {tx_hash}");
-    }
+    log!("Swap tx submitted: {}", tx_hash);
 
-    let receipt = pending
-        .await
-        .map_err(|e| format!("Swap transaction failed while confirming: {e}"))?;
+    let receipt = err_or(pending.await, 
+                         "Swap transaction failed while confirming")?;
     match receipt {
         Some(r) if r.status == Some(1.into()) => {
-            if verbose {
-                println!("    Swap confirmed in block {:?}", r.block_number);
-            }
+            log!("Swap confirmed in block {:?}", r.block_number);
             Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
-        }
-        Some(_) => Err(format!("Swap transaction REVERTED on-chain. Hash: {tx_hash}")),
-        None => Err(format!("Swap transaction was dropped or replaced. Hash: {tx_hash}")),
+        },
+        Some(_) =>
+           Err(format!("Swap transaction REVERTED on-chain. Hash: {tx_hash}")),
+        None =>
+           Err(format!("Swap transaction was dropped or replaced. Hash: {tx_hash}"))
     }
 }
 
@@ -633,13 +613,22 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
                                     symbol: &str, to_address: &str,
                                     amount: f64, keystore_path: &str,
                                     verbose: bool) -> ErrStr<(String, f64)> {
-    debug!("send_tokens_to_address", verbose);
     if amount <= 0.0 {
-        return Err(format!("amount must be positive, got {amount}"));
+        Err(format!("amount must be positive, got {amount}"))
+    } else {
+        send_tokens(blockchain, addy, registry, symbol, to_address, amount,
+                    keystore_path, verbose).await
     }
+}
+
+async fn send_tokens(blockchain: &Blockchain,
+                     addy: &str, registry: &TokenRegistry, symbol: &str,
+                     to_address: &str, amount: f64, keystore_path: &str,
+                     verbose: bool) -> ErrStr<(String, f64)> {
+    debug!("send_tokens_to_address", verbose);
     let signer = load_signer(blockchain, addy, keystore_path).await?;
-    let provider = Provider::<Http>::try_from(&blockchain.url())
-        .map_err(|e| format!("Could not create RPC provider: {e}"))?;
+    let provider = err_or(Provider::<Http>::try_from(&blockchain.url()),
+                          "Could not create RPC provider")?;
     let client = SignerMiddleware::new(provider, signer);
     let entry = registry.token(symbol)?;
     let token_addr = entry.address.ok_or(format!("No address for {symbol}"))?;
@@ -655,20 +644,20 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
     let to = err_or(Address::from_str(&token_addr), "Bad token address")?;
     let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
-    log!("    On its way — courier's en route...");
+    log!("On its way — courier's en route...");
     let pending = err_or(client.send_transaction(tx, None).await,
                          "Transfer transaction failed to send")?;
     let tx_hash = format!("{:?}", pending.tx_hash());
-    log!("    Transfer tx submitted: {}", tx_hash);
+    log!("Transfer tx submitted: {}", tx_hash);
     let receipt = err_or(pending.await,
                          "Transfer transaction failed while confirming")?;
     match receipt {
         Some(r) if r.status == Some(1.into()) => {
-            log!("    Transfer confirmed in block {:?}", r.block_number);
+            log!("Transfer confirmed in block {:?}", r.block_number);
             Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
-        }
+        },
         Some(_) => Err(format!("Transfer transaction REVERTED on-chain. Hash: {tx_hash}")),
-        None => Err(format!("Transfer transaction was dropped or replaced. Hash: {tx_hash}")),
+        None => Err(format!("Transfer transaction was dropped or replaced. Hash: {tx_hash}"))
     }
 }
 
@@ -680,13 +669,17 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
 #[cfg(not(tarpaulin_include))]
 mod unit_tests {
     use super::*;
-    use crate::tokens::fetch_tokens;
+    use crate::{
+       fetchers::tokens::fetch_tokens,
+       logging::{ log_misfire, log_row }
+    };
     use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
       let tokens = fetch_tokens(blockchain).await?;
-      let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await;
+      let query =
+         query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await;
       assert!(query.is_ok());
       Ok(())
    }
@@ -694,24 +687,12 @@ mod unit_tests {
    #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
       let tokens = fetch_tokens(blockchain).await?;
-      let query = query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await?;
+      let query =
+         query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await?;
       let ratio = query.amount_out;
       assert!(ratio > 16.0, "The ratio BTC/ETH is {ratio}");
       Ok(())
    }
-
-    #[test] fn test_hex_to_u128_parses_rpc_style_hex() -> ErrStr<()> {
-        assert_eq!(hex_to_u128("0x0")?, 0);
-        assert_eq!(hex_to_u128("0x")?, 0);
-        assert_eq!(hex_to_u128("0xff")?, 255);
-        assert_eq!(hex_to_u128("0xde0b6b3a7640000")?,
-                   1_000_000_000_000_000_000);
-        Ok(())
-    }
-
-    #[test] fn test_hex_to_u128_rejects_garbage() {
-        assert!(hex_to_u128("0xnotarealnumber").is_err());
-    }
 
     #[test]
     fn test_slippage_adjusted_floor_raises_the_bar_by_the_tolerance() {
@@ -723,7 +704,8 @@ mod unit_tests {
         // The tvá loss this fixes: a quote of 500,700 (0.14% above floor)
         // used to clear a raw 500,000 floor check, then settled 0.29%
         // under floor at 2% slippage. It must NOT clear the adjusted floor.
-        assert!(500_700.0 <= adjusted, "a quote only 0.14% above floor must not clear a 2%-tolerance floor");
+        assert!(500_700.0 <= adjusted,
+                "a quote only 0.14% above floor must not clear a 2%-tolerance floor");
     }
 
     #[test]
@@ -732,37 +714,24 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_pad_address_for_call_produces_32_byte_word() {
-        let padded = pad_address_for_call("0x69b21DC480CA62E478D997d7313061F765a5B122");
-        assert_eq!(padded.len(), 64);
-        assert!(padded.ends_with("69b21dc480ca62e478d997d7313061f765a5b122"));
-        assert!(padded.starts_with("00000000000000000000"));
-    }
-
-    #[test]
-    fn test_log_ts_round_trips_through_utc_without_drift() {
-        for epoch in [0u64, 1_000, 1_785_896_548, 1_785_933_872] {
-            let formatted = log_ts(epoch);
-            let parsed = parse_log_ts(&formatted).expect("a freshly-formatted timestamp must parse back cleanly");
-            assert_eq!(parsed, epoch, "round-tripping epoch {epoch} through '{formatted}' should recover the exact same second, not just the same day");
-        }
-    }
-
-    #[test]
     fn test_biggest_first_sorts_by_raw_proper_amount_descending() {
         let make = |id: Id, proper_amount: f64| OpenPivot {
             pivot_id: id, opened_at: 0, prim: "X".into(), prim_amount: 0.0,
             proper: "Y".into(), proper_amount,
         };
-        let pivots = vec![make(1, 500_000.0), make(2, 0.005), make(3, 520_000.0)];
+        let pivots = vec![make(1, 5e5), make(2, 0.005), make(3, 5.2e5)];
         let sorted = biggest_first(pivots);
         let ids: Vec<Id> = sorted.iter().map(|p| p.pivot_id).collect();
-        assert_eq!(ids, vec![3, 1, 2], "should be ordered biggest proper_amount to smallest, raw number, no currency conversion");
+        assert_eq!(ids, vec![3, 1, 2],
+                   "should be ordered biggest proper_amount to smallest,
+raw number, no currency conversion");
     }
 
     #[test]
-    fn test_replay_log_missing_file_replays_as_a_fresh_empty_pool() -> ErrStr<()> {
-        let (opens, next_pivot, next_close, stats) = replay_log("/tmp/definitely_does_not_exist.log")?;
+    fn test_replay_log_missing_file_replays_as_a_fresh_empty_pool()
+          -> ErrStr<()> {
+        let (opens, next_pivot, next_close, stats) =
+           replay_log("/tmp/definitely_does_not_exist.log")?;
         assert!(opens.is_empty());
         assert_eq!(next_pivot, 1);
         assert_eq!(next_close, 1);
@@ -860,14 +829,17 @@ mod unit_tests {
         let _ = std::fs::remove_file(&path); // clean slate -- log_misfire appends, it doesn't truncate
         let snap = BalanceSnapshot {
             asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
-            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
+            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0
         };
         let cum = CumulativeStats::default();
-        log_misfire(path_str, None, "UNDEAD", "BTC", 500_000.0, 0.0, "", &snap, &cum);
+        log_misfire(path_str, None, "UNDEAD", "BTC", 500_000.0, 0.0, "",
+                    &snap, &cum);
 
         let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
-        assert!(opens.is_empty(), "a MISFIRE must never be replayed as a real open pivot");
-        assert_eq!(next_pivot, 1, "id counters must not advance from a MISFIRE");
+        assert!(opens.is_empty(),
+                "a MISFIRE must never be replayed as a real open pivot");
+        assert_eq!(next_pivot, 1,
+                   "id counters must not advance from a MISFIRE");
         assert_eq!(next_close, 1);
         assert_eq!(stats.total_opens, 0);
         assert_eq!(stats.total_closes, 0);
@@ -878,7 +850,8 @@ mod unit_tests {
 
     #[test]
     fn test_replay_log_rejects_misfire_with_a_pivot_id() {
-        let path = std::env::temp_dir().join("auto_trading_test_misfire_bad.log");
+        let path =
+           std::env::temp_dir().join("auto_trading_test_misfire_bad.log");
         let path_str = path.to_str().unwrap();
         let _ = std::fs::remove_file(&path);
         let snap = BalanceSnapshot {

@@ -6,7 +6,7 @@ use libs::types::blockchains::Blockchain;
 
 use super::{
    clients::http_client,
-   hex::pad_address_for_call,
+   hex::{ hex_to_u128, pad_address_for_call },
    types::tokens::TokenRegistry
 };
 
@@ -39,13 +39,6 @@ async fn rpc_call(blockchain: &Blockchain, method: &str, params: Value)
     } else {
        parsed.result.ok_or(format!("RPC call {method} returned no result"))
     }
-}
-
-fn hex_to_u128(hex: &str) -> ErrStr<u128> {
-    let trimmed0 = hex.trim_start_matches("0x");
-    let trimmed = if trimmed0.is_empty() { "0" } else { trimmed0 };
-    err_or(u128::from_str_radix(trimmed, 16),
-           &format!("Could not parse hex balance '{hex}'"))
 }
 
 async fn erc20_balance(blockchain: &Blockchain, addy: &str, contract: &str)
@@ -91,7 +84,8 @@ mod functional_tests {
 
     run!("wallet_balance_undead", {
         let registry = now(fetch_tokens(&AVALANCHE))?;
-        let balance = now(wallet_balance("0x123", "UNDEAD", &registry))?;
+        let balance =
+           now(wallet_balance(&AVALANCHE, "0x123", "UNDEAD", &registry))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
     });
 }

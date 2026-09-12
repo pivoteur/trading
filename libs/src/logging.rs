@@ -5,11 +5,11 @@ use std::{
    time::{ SystemTime, UNIX_EPOCH }
 };
 use chrono::{ DateTime, Utc };
-use book::err_utils::ErrStr;
+use book::err_utils::{ ErrStr, err_or };
 use libs::types::util::Id;
 use super::types::{ balances::BalanceSnapshot, stats::CumulativeStats };
 
-pub const LOG_TS_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
+const LOG_TS_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
 
 fn now_ts() -> u64 {
    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap()
@@ -17,15 +17,20 @@ fn now_ts() -> u64 {
 
 pub fn log_ts() -> String {
     let epoch = now_ts();
+    log_ts_epoch(epoch)
+}
+
+fn log_ts_epoch(epoch: u64) -> String {
     DateTime::<Utc>::from_timestamp(epoch as i64, 0)
         .map(|dt| dt.format(LOG_TS_FORMAT).to_string())
-        .unwrap_or_else(|| format!("(bad timestamp: {epoch})"))
+        .unwrap_or(format!("(bad timestamp: {epoch})"))
 }
 
 pub fn parse_log_ts(s: &str) -> ErrStr<u64> {
-    chrono::NaiveDateTime::parse_from_str(s, LOG_TS_FORMAT)
-        .map(|ndt| ndt.and_utc().timestamp() as u64)
-        .map_err(|e| format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}', e.g. '2026-08-05 14:32:07'): {e}"))
+    err_or(chrono::NaiveDateTime::parse_from_str(s, LOG_TS_FORMAT)
+        .map(|ndt| ndt.and_utc().timestamp() as u64),
+        &format!("bad timestamp '{s}' (expected UTC '{LOG_TS_FORMAT}',
+e.g. '2026-08-05 14:32:07')"))
 }
 
 pub fn append_trade_log_line(path: &str, line: &str, header: Option<&str>) {
@@ -94,8 +99,12 @@ pub fn log_close(path: &str, header: Option<&str>, pivot_id: Id, close_id: Id,
             Some(roi), Some(apr), gas_avax, tx_hash, snap, cum);
 }
 
-pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str, prim_amount: f64, proper_amount: f64, tx_hash: &str, snap: &BalanceSnapshot, cum: &CumulativeStats) {
-    log_row(path, header, "MISFIRE", None, None, None, prim, proper, prim_amount, proper_amount, None, None, None, 0.0, tx_hash, snap, cum);
+pub fn log_misfire(path: &str, header: Option<&str>, prim: &str, proper: &str,
+                   prim_amount: f64, proper_amount: f64, tx_hash: &str,
+                  snap: &BalanceSnapshot, cum: &CumulativeStats) {
+    log_row(path, header, "MISFIRE", None, None, None, prim, proper,
+            prim_amount, proper_amount, None, None, None, 0.0, tx_hash,
+            snap, cum);
 }
 
 fn snapshot_and_cumulative_columns(snap: &BalanceSnapshot,
@@ -110,3 +119,20 @@ fn snapshot_and_cumulative_columns(snap: &BalanceSnapshot,
 
 // ----- TESTS -------------------------------------------------------
 
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod tests {
+   use super::*;
+
+    #[test] fn test_log_ts_round_trips_through_utc_without_drift()
+          -> ErrStr<()> {
+        for epoch in [0u64, 1_000, 1_785_896_548, 1_785_933_872] {
+            let formatted = log_ts_epoch(epoch);
+            let parsed = parse_log_ts(&formatted)?;
+            assert_eq!(parsed, epoch,
+                      "round-tripping epoch {epoch} through '{formatted}'
+should recover the exact same second, not just the same day");
+        }
+        Ok(())
+    }
+}

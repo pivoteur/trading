@@ -1,15 +1,9 @@
-use std::collections::HashMap;
-
-use serde::{ Deserialize, Serialize };
-
-use book::{
-   csv_utils::{ CsvWriter, CsvHeader, as_csv },
-   err_utils::ErrStr,
-   rest_utils::read_rest,
-   string_utils::s
-};
+use book::{ err_utils::{ ErrStr, err_or }, rest_utils::read_rest };
 use libs::types::blockchains::Blockchain;
-use super::{ path_utils::token_url, types::tokens::TokenRegistry };
+use crate::{
+   path_utils::token_url,
+   types::tokens::{ TokenRegistry, mk_token_registry }
+};
 
 //============================================================================
 //----- Token Registry --------------------------------------------------------
@@ -24,9 +18,9 @@ pub async fn fetch_tokens(blockchain: &Blockchain) -> ErrStr<TokenRegistry> {
 /// Each blockchain has its own tokens in a toml (the token
 /// set differs per blockchain) and passes the raw string here to parse it.
 fn parse_token_registry(toml_str: &str) -> ErrStr<TokenRegistry> {
-    let tokens = toml::from_str(toml_str)
-         .map_err(|e| format!("Failed to parse tokens.toml: {e}"))?;
-    Ok(TokenRegistry { tokens })
+    let tokens =
+       err_or(toml::from_str(toml_str), "Failed to parse tokens.toml")?;
+    Ok(mk_token_registry(tokens))
 }
 
 // ----- TESTS -------------------------------------------------------
@@ -38,6 +32,7 @@ mod functional_tests {
    use paste::paste;
    use book::{ create_testing, csv_utils::print_csv, utils::now };
    use libs::types::blockchains::Blockchain::*;
+   use crate::auto_trading::query_swap;
 
    create_testing!("libs::tokens");
 
@@ -51,8 +46,8 @@ mod functional_tests {
       print_csv(&toks);
    });
 
-   async fn run_query(prim: &str, piv: &str, amt: f32)
-         -> ErrStr<(f32, String)> {
+   async fn run_query(prim: &str, piv: &str, amt: f64)
+         -> ErrStr<(f64, String)> {
       let registry = fetch_tokens(&AVALANCHE).await?;
       let swap =
          query_swap(&AVALANCHE, &registry, prim, piv, amt, true).await?;
@@ -99,7 +94,7 @@ mod tests {
       Ok(())
    }
 
-    #[tokio::test] fn test_fetch_token_registry_has_btc_undead_avax()
+    #[tokio::test] async fn test_fetch_token_registry_has_btc_undead_avax()
           -> ErrStr<()> {
         let registry = fetch_tokens(&AVALANCHE).await?;
         for symbol in ["BTC", "UNDEAD", "AVAX"] {

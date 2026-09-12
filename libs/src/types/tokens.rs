@@ -26,6 +26,10 @@ pub struct TokenRegistry {
    tokens: HashMap<String, TokenEntry>
 }
 
+pub fn mk_token_registry(tokens: HashMap<String, TokenEntry>) -> TokenRegistry {
+   TokenRegistry { tokens }
+}
+
 impl TokenRegistry {
    pub fn token(&self, symbol: &str) -> ErrStr<TokenEntry> {
       self.tokens.get(&symbol.to_uppercase())
