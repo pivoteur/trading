@@ -16,13 +16,13 @@ use libs::{
 };
 use trading::{
    auto_trading::{
-      wallet_balance, query_swap,
-      execute_trade, balance_snapshot, BalanceSnapshot,
-      AttemptOutcome, attempt_trade_with_actual_amount,
-      biggest_first, now_ts, replay_log, log_open, log_close,
+      wallet_balance, query_swap, execute_trade, pool_balance, biggest_first,
+      AttemptOutcome, attempt_trade_with_actual_amount, replay_log,
       UNDEAD, NO_REAL_FLOOR
    },
-   tokens::{ TokenRegistry, load_tokens }
+   fetchers::tokens::fetch_tokens,
+   logging::{ log_open, log_close },
+   types::{ balances::BalanceSnapshot, tokens::TokenRegistry }
 };
 
 //============================================================================
@@ -211,7 +211,7 @@ async fn run_pool_cycle(
 /// are configured — see the note on open_trade_amount above.
 pub async fn run_survey(wallet_address: &str, dry_run: bool, debug: bool)
        -> ErrStr<()> {
-    let registry = load_tokens(&AVALANCHE).await?;
+    let registry = fetch_tokens(&AVALANCHE).await?;
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
 
     println!("arbitrage — full survey{mode_tag} — wallet {wallet_address}");

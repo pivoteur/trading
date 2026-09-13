@@ -82,10 +82,20 @@ mod functional_tests {
 
     create_testing!("wallets");
 
-    run!("wallet_balance_undead", {
-        let registry = now(fetch_tokens(&AVALANCHE))?;
-        let balance =
-           now(wallet_balance(&AVALANCHE, "0x123", "UNDEAD", &registry))?;
-        println!("\ttest wallet UNDEAD balance: {balance:.8}");
-    });
+    const TEST_MANDI_ADDRESS: &str =
+       "0x6700bD7EAE41434f566e48738813fC585B95669a";
+
+    async fn fetch_balance(hdr: &str, tok: &str) -> ErrStr<()> {
+       let ava = &AVALANCHE;
+       let registry = fetch_tokens(ava).await?;
+       let balance =
+          wallet_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
+       println!("Test wallet {tok}{hdr} balance: {balance:.8}");
+       Ok(())
+    }
+
+    run!("wallet_balance_btc", now(fetch_balance("", "BTC"))?);
+    run!("wallet_balance_undead", now(fetch_balance("", "UNDEAD"))?);
+    run!("wallet_balance_avax_native", 
+         now(fetch_balance(" (native)", "AVAX"))?);
 }

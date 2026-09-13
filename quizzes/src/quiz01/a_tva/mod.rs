@@ -17,22 +17,22 @@ use trading::{
       wallet_balance,
       OpenPivot,
       CumulativeStats,
-      BalanceSnapshot,
-      balance_snapshot,
+      pool_balance,
       AttemptOutcome,
       attempt_trade_with_actual_amount,
       biggest_first,
-      now_ts,
       replay_log,
-      log_open,
-      log_close,
-      log_misfire,
       report_misfire,
       MisfireStage,
       UNDEAD,
       NO_REAL_FLOOR
    },
-   tokens::{ TokenRegistry, load_tokens }
+   fetchers::tokens::fetch_tokens,
+   logging::{ log_open, log_close, log_misfire },
+   types::{
+      balances::BalanceSnapshot,
+      tokens::TokenRegistry
+   }
 };
 
 //----- Fixed Trade Sizes ------------------------------------------------------
@@ -124,7 +124,7 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
 // via `resolve_wallet_address`. See the `Args` struct below.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &Blockchain, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let registry = load_tokens(blockchain).await?;
+    let registry = fetch_tokens(blockchain).await?;
     let ctx = mk_cycle_ctx(wallet_address, vault_address, keystore_path,
                    log_path, blockchain, &registry, dry_run, debug);
 
@@ -585,6 +585,7 @@ mod unit_tests {
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 pub mod functional_tests {
+    use std::{ env::temp_dir, fs::{ write, remove_dir } };
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::now };
@@ -598,54 +599,19 @@ pub mod functional_tests {
 
     create_testing!("quiz01::a_tva");
 
-    run!("wallet_balance_btc", {
-        let registry = load_tokens(&AVALANCHE)?;
-        let balance = now(wallet_balance(
-            TEST_MANDI_ADDRESS,
-            "BTC",
-            &registry,
-        ))?;
-        println!("\ttest wallet BTC balance: {balance:.8}");
-    });
-
-    run!("wallet_balance_undead", {
-        let registry = now(load_tokens(&AVALANCHE))?;
-        let balance = now(wallet_balance(
-            TEST_MANDI_ADDRESS,
-            "UNDEAD",
-            &registry,
-        ))?;
-        println!("\ttest wallet UNDEAD balance: {balance:.2}");
-    });
-
-    run!("wallet_balance_avax_native_coin_branch", {
-        let registry = now(load_tokens(&AVALANCHE))?;
-        let balance = now(wallet_balance(
-            TEST_MANDI_ADDRESS,
-            "AVAX",
-            &registry,
-        ))?;
-        println!("\ttest wallet AVAX (native) balance: {balance:.5}");
-    });
-
     async fn sample_cycle(btc: f32, undead: f32) -> ErrStr<()> {
-        let log_path =
-           std::env::temp_dir().join("a_tva_functional_test_cycle_dry_run.log");
+        let log_path = temp_dir().join("a_tva_test_cycle_dry_run.log");
         let log_path_str = log_path.to_str().unwrap();
         let row = "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n";
-        std::fs::write(&log_path, row)
-           .map_err(|e| format!("could not write test fixture: {e}"))?;
+        err_or(write(&log_path, row),
+               "could not write test fixture")?;
         run_cycle(TEST_MANDI_ADDRESS, TEST_SOLONGE_ADDRESS, "unused-in-dry-run",
-                  log_path_str, "avalanche", btc, undead, 25.0, true, true))?;
+                  log_path_str, "avalanche", btc, undead, 25.0, true, true)?;
         println!("\tdry-run cycle completed without touching the keystore or any env var");
-        let _ = std::fs::remove_file(&log_path);
-       Ok(())
+        remove_file(&log_path)
     }
 
-    run!("cycle_dry_run",
-         now(sample_cycle(DEFAULT_BTC_TRADE_AMOUNT,
-                          DEFAULT_UNDEAD_TRADE_AMOUNT))?);
-    run!("cycle_dry_run_custom_trade_amounts", {
-         now(sample_cycle(0.001, 1e5))?);
-    });
+    run!("cycle_dry_run", now(sample_cycle(DEFAULT_BTC_TRADE_AMOUNT,
+                                           DEFAULT_UNDEAD_TRADE_AMOUNT))?);
+    run!("cycle_dry_run_custom_trade_amounts", now(sample_cycle(0.001, 1e5))?);
 }

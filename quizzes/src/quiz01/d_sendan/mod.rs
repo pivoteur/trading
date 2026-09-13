@@ -9,14 +9,10 @@ use book::{
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
    addresses::is_valid_evm_address,
-   auto_trading::{
-      wallet_balance,
-      send_tokens_to_address,
-      now_ts,
-      log_ts,
-      append_trade_log_line
-   },
-   tokens::load_tokens
+   auto_trading::send_tokens_to_address,
+   fetchers::tokens::fetch_tokens,
+   logging::{ log_ts, append_trade_log_line },
+   wallets::wallet_balance
 };
 
 //======================================================

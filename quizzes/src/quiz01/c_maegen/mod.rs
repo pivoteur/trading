@@ -4,37 +4,36 @@ use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   string_utils::{UppercaseString, s},
+   string_utils::{UppercaseString, s}
 };
 use libs::types::blockchains::Blockchain;
 use trading::{
    auto_trading::{
-      wallet_balance,
-      query_swap,
-      attempt_trade_with_actual_amount,
-      AttemptOutcome,
-      NO_REAL_FLOOR,
-      UNDEAD,
-      now_ts,
-      log_ts,
-      append_trade_log_line
+      query_swap, 
+      AttemptOutcome, attempt_trade_with_actual_amount,
+      NO_REAL_FLOOR, UNDEAD
    },
-   tokens::load_tokens
+   fetchers::tokens::fetch_tokens,
+   logging::{ log_ts, append_trade_log_line },
+   wallets::wallet_balance
 };
 
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const DUST_EPSILON: f64 = 1e-8;
-const TRADE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
-const TRADE_LOG_HEADER: &str = "timestamp\tmode\ttoken\tundead_balance\ttoken_balance\ttoken_value_in_undead\tswap_undead\toutcome\tactual_received\tgas_avax\ttx_hash";
+const TRADE_LOG_PATH: &'static str =
+   concat!(env!("CARGO_MANIFEST_DIR"), "/data/maegen-undead-btc.log");
+const TRADE_LOG_HEADER: &'static str = "timestamp\tmode\ttoken\tundead_balance\ttoken_balance\ttoken_value_in_undead\tswap_undead\toutcome\tactual_received\tgas_avax\ttx_hash";
 
-//=========================================================================================
-// ----- CLI --------------------------------------------------------------------------------
-//=========================================================================================
+// =======================================================
+// ----- CLI ---------------------------------------------
+//========================================================
+
 #[derive(Debug, Parser)]
 #[command(version = "1.1.0")]
 struct Args {
+    /// Blockchain on which trade occurs 
     blockchain: Blockchain,
-    /// non-UNDEAD side of the pair, e.g. `BTC` -- must be in data/{blockchain}.toml
+    /// non-UNDEAD side of the pair, e.g. `BTC`
     token: UppercaseString,
     /// defaults to the vault -- override to run against any
     /// other wallet, as long as its tokens are in data/{blockchain}.toml
@@ -64,9 +63,9 @@ fn log_run(
     append_trade_log_line(TRADE_LOG_PATH, &line, Some(TRADE_LOG_HEADER));
 }
 
-//========================================================================================
-// ----- CALCULATIONS ----------------------------------------------------------------------
-//========================================================================================
+// =======================================================
+// ----- CALCULATIONS ------------------------------------
+//========================================================
 /// UNDEAD-equivalent value of `token_balance`, derived from a UNDEAD -> token
 /// quote (`quote_out` token for `undead_quoted` UNDEAD) rather than a direct
 /// token -> UNDEAD quote -- keeps every KyberSwap call in this file one-way.
@@ -79,8 +78,7 @@ fn token_value_in_undead(token_balance: f64, undead_quoted: f64, quote_out: f64)
 fn compute_swap_amount(undead_balance: f64, token_value_in_undead: f64) -> f64 {
     (undead_balance - token_value_in_undead) / 2.0
 }
-//=====
-#[allow(clippy::too_many_arguments)]
+
 async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault_address: &str, keystore_path: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
     debug!("runoff_continuation", debug);
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
@@ -106,7 +104,8 @@ async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault_address
         return Ok(());
     }
 
-    let reference_quote = query_swap(blockchain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
+    let reference_quote =
+       query_swap(blockchain, &registry, UNDEAD, token, reference_amount, debug).await?.amount_out;
     println!("{reference_amount:.8} UNDEAD (half balance) quotes to {reference_quote:.8} {token}");
     if reference_quote <= DUST_EPSILON {
         return Err(format!("KyberSwap quoted ~0 {token} for {reference_amount:.8} UNDEAD -- no route/liquidity right now."));
@@ -155,25 +154,15 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     runoff_continuation(&args.blockchain, &args.token, &args.wallet_address, &args.keystore_path, args.slippage_bps, args.dry_run, args.debug).await
 }
 
-//==========================================================================================
-// ----- UNIT TESTS --------------------------------------------------------------------------
-//==========================================================================================
+// ======================================================
+// ----- UNIT TESTS -------------------------------------
+// ======================================================
 #[cfg(not(tarpaulin_include))]
 #[cfg(test)]
 mod unit_tests {
     use super::*;
 
    const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-
-    #[test]
-    fn test_load_token_registry_has_btc_undead_avax() -> ErrStr<()> {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        for symbol in ["BTC", "UNDEAD", "AVAX"] {
-            assert!(registry.contains_key(symbol), "missing '{symbol}' in tokens.toml");
-        }
-        Ok(())
-    }
 
     #[test]
     fn test_token_value_in_undead_uses_the_undead_to_token_rate() {
@@ -202,9 +191,9 @@ mod unit_tests {
         assert!((compute_swap_amount(2.42, 0.0) - 1.21).abs() < 1e-9);
     }
 }
-//============================================================================================
-// ----- FUNCTIONAL TEST -----------------------------------------------------------------------
-//============================================================================================
+// ======================================================
+// ----- FUNCTIONAL TEST --------------------------------
+// ======================================================
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 pub mod functional_tests {
@@ -217,30 +206,9 @@ pub mod functional_tests {
 
     create_testing!("quiz01::c_maegen");
 
-    run!("wallet_balance_btc", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let balance = now(wallet_balance(
-            "0x123",
-            "BTC",
-            &registry,
-        ))?;
-        println!("\ttest wallet BTC balance: {balance:.4}");
-    });
-
-    run!("wallet_balance_undead", {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        let balance = now(wallet_balance(
-            "0x123",
-            "UNDEAD",
-            &registry,
-        ))?;
-        println!("\ttest wallet UNDEAD balance: {balance:.8}");
-    });
-
-    run!("maegen_functionality", {
-        now(runoff_continuation("avalanche", "BTC", "0x123", "", DEFAULT_SLIPPAGE_BPS, true, false))?;
+    run!("maegen", {
+        now(runoff_continuation("avalanche", "BTC", "0x123", "",
+                                DEFAULT_SLIPPAGE_BPS, true, false))?;
         println!("maegen is ok");
     });
 }

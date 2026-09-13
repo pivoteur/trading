@@ -1,57 +1,83 @@
 use clap::Parser;
+use serde::Serialize;
+use serde_with::{ serde_as, DisplayFromStr };
+
 use book::{
+    debug,
+    parse_args_add_banner,
     cli_utils::generate_banner,
+    currency::usd::mk_usd,
+    cvs_utils::as_csv,
     err_utils::ErrStr,
     file_utils::read_file,
-    parse_args_add_banner,
+    string_utils::s
 };
-use trading::auto_trading::{TokenRegistry, parse_token_registry, wallet_balance};
+use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
+use trading::{
+   fetchers::tokens::fetch_tokens,
+   types::tokens::TokenRegistry,
+   wallets::wallet_balance
+};
 
-//----- Token Registry --------------------------------------------------------
-const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const DUST_EPSILON: f64 = 1e-8;
-
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
 
 fn has_balance(balance: f64) -> bool {
     balance > DUST_EPSILON
 }
 
-//----- CLI --------------------------------------------------------------------
+//----- CLI -------------------------------------------------------
+
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "0.1.0")]
+#[command(version = "1.0.0")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
+
     /// Which chain's data/{blockchain}.toml to load.
-    #[arg(long, default_value = "avalanche")]
-    blockchain: String,
-    /// Balance for just this token; omitted prints every token in the registry.
-    #[arg(long)]
-    token: Option<String>,
+    #[arg(long, default_value_t = AVALANCHE)]
+    blockchain: Blockchain,
+
+    /// Print debugging information
+    #[arg(short, long)]
+    debug: bool
 }
 
-//----- Wallet Read --------------------------------------------------------------
-pub async fn read_wallet(wallet_address: &str, blockchain: &str, token: Option<&str>) -> ErrStr<()> {
-    let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
-    let registry = load_token_registry(&tokens)?;
+// ----- TokenBalance -------------------------------------------------------
 
-    println!("wallet {wallet_address} on {blockchain}");
+#[serde_as]
+#[derive(Debug, Clone, Serialize)]
+struct TokenBalance {
+   token: String,
+   #[serde_as(as = "DisplayFromStr")]
+   quote: USD,
+   amount: f32,
+   #[serde_as(as = "DisplayFromStr")]
+   nav: USD
+}
 
-    match token {
-        Some(symbol) => {
-            let balance = wallet_balance(wallet_address, symbol, &registry).await?;
-            println!("  {symbol}: {balance:.8}");
-        }
-        None => {
-            let mut symbols: Vec<&String> = registry.keys().collect();
-            symbols.sort();
-            for symbol in symbols {
-                match wallet_balance(wallet_address, symbol, &registry).await {
-                    Ok(balance) if has_balance(balance) => println!("  {symbol}: {balance:.8}"),
+fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
+   let nav = mk_usd(quote.amount * amount);
+   TokenBalance { token: s(tok), quote, amount, nav }
+}
+
+//----- Wallet Read ---------------------------------------------
+
+async fn read_wallet(wallet_address: &str, blockchain: &Blockchain,
+                         debug: bool) -> ErrStr<Vec<TokenBalance>> {
+    debug!("read_wallet", debug);
+    let registry = fetch_tokens(&blockchain)?;
+
+    log!("wallet {wallet_address} on {blockchain}");
+
+    let mut symbols: Vec<String> = registry.keys().collect();
+    symbols.sort();
+    let mut ans = Vec::new();
+    for symbol in symbols {
+       match wallet_balance(wallet_address, symbol, &registry).await {
+          Ok(balance) if has_balance(balance) => { 
+             log!("{symbol}: {balance:.8}"),
+             let qt = query_quote(
                     Ok(_) => {} // zero/dust balance -- not actually in the wallet, skip it
                     Err(e) => println!("  {symbol}: ! could not read balance ({e})"),
                 }

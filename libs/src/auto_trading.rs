@@ -8,6 +8,7 @@ use serde_json::{ Value, from_str, json };
 
 use book::{
     debug,
+    currency::usd::{ USD, mk_usd },
     err_utils::{ ErrStr, err_or },
     file_utils::lines_from_file
 };
@@ -57,6 +58,12 @@ pub struct KyberSwap {
 fn api_url(blockchain: &Blockchain) -> String {
     let base_url = "https://aggregator-api.kyberswap.com";
     format!("{base_url}/{}/api/v1", blockchain.blockchain())
+}
+
+pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
+                         tok: &str, debug: bool) -> ErrStr<USD> {
+   let kyb = query_swap(blockchain, registry, tok, "USDC", 1.0, debug).await?;
+   Ok(mk_usd(kyb.amount_out))
 }
 
 pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
