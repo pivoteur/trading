@@ -9,8 +9,7 @@ use serde_json::{ Value, from_str, json };
 use book::{
     debug,
     err_utils::{ ErrStr, err_or },
-    file_utils::lines_from_file,
-    string_utils::s
+    file_utils::lines_from_file
 };
 use ethers::{
    middleware::SignerMiddleware,
@@ -19,7 +18,7 @@ use ethers::{
    types::{
       transaction::eip2718::TypedTransaction,
       Address, Bytes, Eip1559TransactionRequest, U256
-   },
+   }
 };
 use libs::types::{ blockchains:: Blockchain, util::Id };
 
@@ -503,7 +502,9 @@ pub async fn approve_exact_amount(
     let to = err_or(Address::from_str(token_contract), "Bad token address")?;
     let data = err_or(Bytes::from_str(&data_hex), "Bad approve calldata")?;
     let tx = build_tx_with_fee_buffer(client, to, data).await?;
-    complete_transaction(client, tx, "approve", false, verbose).await
+    let (_tx, gas) =
+       complete_transaction(client, tx, "approve", false, verbose).await?;
+    Ok(gas)
 }
 
 /// Asks KyberSwap to encode the actual swap calldata for the route.
@@ -564,7 +565,6 @@ pub async fn send_swap_tx(
         router: &str,
         calldata_hex: &str,
         verbose: bool) -> ErrStr<(String, f64)> {
-    debug!("send_swap_tx", verbose);
     let to = err_or(Address::from_str(router), "Bad router address")?;
     let data =
          err_or(Bytes::from_str(calldata_hex), "Bad calldata from KyberSwap")?;
@@ -574,25 +574,23 @@ pub async fn send_swap_tx(
 
 async fn complete_transaction(
         client: &SignerMiddleware<Provider<Http>, LocalWallet>,
-        tx: Eip1559TransactionRequest, tx_type: &str, check_status: bool,
-        verbose: bool) -> ErrStr<f64> {
-    debug!(format!("complete_{tx_type}_transaction"), verbose);
+        tx: Eip1559TransactionRequest, tx_type: &str, check_state: bool,
+        verbose: bool) -> ErrStr<(String, f64)> {
+    debug!("complete_transaction", verbose);
     let pending = err_or(client.send_transaction(tx, None).await,
                          &format!("{tx_type} transaction failed to send"))?;
-    let tx_hash = pending.tx_hash();
-    log!("{} tx submitted: {:?}", tx_type, tx_hash);
+    let tx_hash = format!("{:?}", pending.tx_hash());
+    log!("Transaction {} tx submitted: {}", tx_type, tx_hash);
 
     let receipt =
        err_or(pending.await,
               &format!("{tx_type} transaction failed while confirming"))?;
     match receipt {
         Some(r) => {
-            fn ok(tx: &str, s: ()) -> ErrStr<f64> {
-               log!("{} confirmed in block {:?}", tx, s.block_number);
-               Ok(gas_cost_avax(s.gas_used, s.effective_gas_price))
-            }
             if !check_state || r.status == Some(1.into()) {
-               ok(tx_type, r)
+               log!("Transaction {} confirmed in block {}",
+                    tx_type, format!("{:?}", r.block_number));
+               Ok((tx_hash, gas_cost_avax(r.gas_used, r.effective_gas_price)))
             } else {
                Err(format!("{tx_type} transaction REVERTED on-chain.
 Hash: {tx_hash}"))
@@ -647,7 +645,7 @@ async fn send_tokens(blockchain: &Blockchain,
     let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
     let tx = build_tx_with_fee_buffer(&client, to, data).await?;
     log!("On its way — courier's en route...");
-    complete_transaction(client, tx, "transfer", true, verbose).await
+    complete_transaction(&client, tx, "transfer", true, verbose).await
 }
 
 //============================================================================
