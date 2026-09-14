@@ -63,7 +63,7 @@ fn api_url(blockchain: &Blockchain) -> String {
 pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
                          tok: &str, debug: bool) -> ErrStr<USD> {
    let kyb = query_swap(blockchain, registry, tok, "USDC", 1.0, debug).await?;
-   Ok(mk_usd(kyb.amount_out))
+   Ok(mk_usd(kyb.amount_out as f32))
 }
 
 pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
@@ -655,9 +655,98 @@ async fn send_tokens(blockchain: &Blockchain,
     complete_transaction(&client, tx, "transfer", true, verbose).await
 }
 
+pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
+                           registry: &TokenRegistry, from: &str, to: &str,
+                           amount: f64, min_floor: f64, slippage_bps: u16,
+                           keystore_path: &str, verbose: bool)
+      -> ErrStr<(String, f64)> {
+    debug!("execute_trade", verbose);
+    log!("Trading in progress — approve/quote/swap. This part takes a minute.");
+    log!(">>> Re-checking the quote after keystore unlock (it may have moved)");
+    let fresh_quote =
+       query_swap(blockchain, registry, from, to, amount, verbose).await?;
+    let ratio = fresh_quote.amount_out;
+    let trade = format!("{amount:.6} {from} -> {:.8} {to}", ratio);
+    log!("Fresh quote: {}", trade);
+
+    // See slippage_adjusted_floor: the swap below is authorized (via
+    // slippage_bps) to settle as low as fresh_quote * (1 - slippage_bps),
+    // so the fresh quote itself must clear that worse case, not just
+    // min_floor, or a real close can settle under floor.
+    
+    let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
+    if fresh_quote.amount_out < guaranteed_floor {
+       Err(format!("Quote moved below your floor while unlocking the keystore
+({:.8} {to} quoted, but only {:.8} {to} is guaranteed at {slippage_bps} bps
+slippage tolerance -- need > {min_floor:.8} {to}).
+        
+That's not happening. No funds used.", ratio,
+           ratio * (1.0 - slippage_bps as f64 / 10_000.0)
+        )) 
+    } else { 
+       execute_trade_continuation(blockchain, addy, keystore_path,
+                                  registry, from, amount, fresh_quote,
+                                  slippage_bps, verbose).await
+    }
+}
+
+async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
+                                    keystore_path: &str,
+                                    registry: &TokenRegistry, from: &str,
+                                    amount: f64, fresh_quote: KyberSwap,
+                                    slippage_bps: u16, verbose: bool)
+      -> ErrStr<(String, f64)> {
+    debug!("execute_trade_continuation", verbose);
+    let signer = load_signer(blockchain, addy, keystore_path).await?;
+    let provider = err_or(Provider::<Http>::try_from(blockchain.url()),
+                          "Could not create RPC provider")?;
+    let client = SignerMiddleware::new(provider, signer);
+    let from_entry = registry.token(from)?;
+    let from_addr = from_entry.address.ok_or(format!("No address for {from}"))?;
+    let amount_base =
+       (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
+    log!(">>> Approving exact amount ({:.6} {}) for the router", amount, from);
+    let approve_gas =
+       approve_exact_amount(&client, &from_addr, &fresh_quote.router_address,
+                            amount_base, verbose).await?;
+    log!(">>> Requesting swap calldata from KyberSwap...");
+    let (router, calldata) =
+        kyberswap_build(blockchain, &fresh_quote.route_summary_raw, addy,
+                        slippage_bps, verbose).await?;
+    log!(">>> Sending swap transaction...");
+    let (tx_hash, swap_gas) =
+       send_swap_tx(&client, &router, &calldata, verbose).await?;
+
+    Ok((tx_hash, approve_gas + swap_gas))
+}
+
+
 //============================================================================
 //----- UNIT TESTS -------------------------------------------------------------
 //============================================================================
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use paste::paste;
+   use book::{ create_testing, utils::now };
+   use crate::fetchers::tokens::fetch_tokens;
+
+   create_testing!("auto_trading");
+
+   async fn quote_for(tok: &str) -> ErrStr<()> {
+      let token = tok.to_uppercase();
+      let ava = &Blockchain::AVALANCHE;
+      let reg = fetch_tokens(ava).await?;
+      let quote = query_quote(ava, &reg, &token, true).await?;
+      println!("{token} quote: {quote}");
+      Ok(())
+   }
+
+   run!("btc_quote", now(quote_for("btc"))?);
+   run!("undead_quote", now(quote_for("undead"))?);
+}
 
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
@@ -690,21 +779,21 @@ mod unit_tests {
 
     #[test]
     fn test_slippage_adjusted_floor_raises_the_bar_by_the_tolerance() {
-        // 200 bps = 2% tolerance: a quote must clear floor/0.98 so that
-        // even a 2%-worse settlement still lands at or above floor.
-        let floor = 500_000.0;
-        let adjusted = slippage_adjusted_floor(floor, 200);
-        assert!((adjusted - 500_000.0 / 0.98).abs() < 1e-6);
-        // The tvá loss this fixes: a quote of 500,700 (0.14% above floor)
-        // used to clear a raw 500,000 floor check, then settled 0.29%
-        // under floor at 2% slippage. It must NOT clear the adjusted floor.
-        assert!(500_700.0 <= adjusted,
-                "a quote only 0.14% above floor must not clear a 2%-tolerance floor");
+       // 200 bps = 2% tolerance: a quote must clear floor/0.98 so that
+       // even a 2%-worse settlement still lands at or above floor.
+       let floor = 500_000.0;
+       let adjusted = slippage_adjusted_floor(floor, 200);
+       assert!((adjusted - 500_000.0 / 0.98).abs() < 1e-6);
+       // The tvá loss this fixes: a quote of 500,700 (0.14% above floor)
+       // used to clear a raw 500,000 floor check, then settled 0.29%
+       // under floor at 2% slippage. It must NOT clear the adjusted floor.
+       assert!(500_700.0 <= adjusted,
+          "a quote only 0.14% above floor must not clear a 2%-tolerance floor");
     }
 
     #[test]
     fn test_slippage_adjusted_floor_is_a_noop_at_zero_slippage() {
-        assert_eq!(slippage_adjusted_floor(500_000.0, 0), 500_000.0);
+       assert_eq!(slippage_adjusted_floor(500_000.0, 0), 500_000.0);
     }
 
     #[test]
@@ -924,69 +1013,4 @@ raw number, no currency conversion");
     fn test_report_misfire_close_does_not_panic() {
         report_misfire(MisfireStage::Close, Some(12), "UNDEAD", "BTC", 500_000.0, "Swap transaction REVERTED on-chain. Hash: 0xdef");
     }
-}
-
-pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
-                           registry: &TokenRegistry, from: &str, to: &str,
-                           amount: f64, min_floor: f64, slippage_bps: u16,
-                           keystore_path: &str, verbose: bool)
-      -> ErrStr<(String, f64)> {
-    debug!("execute_trade", verbose);
-    log!("Trading in progress — approve/quote/swap. This part takes a minute.");
-    log!(">>> Re-checking the quote after keystore unlock (it may have moved)");
-    let fresh_quote =
-       query_swap(blockchain, registry, from, to, amount, verbose).await?;
-    let ratio = fresh_quote.amount_out;
-    let trade = format!("{amount:.6} {from} -> {:.8} {to}", ratio);
-    log!("Fresh quote: {}", trade);
-
-    // See slippage_adjusted_floor: the swap below is authorized (via
-    // slippage_bps) to settle as low as fresh_quote * (1 - slippage_bps),
-    // so the fresh quote itself must clear that worse case, not just
-    // min_floor, or a real close can settle under floor.
-
-    let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
-    if fresh_quote.amount_out < guaranteed_floor {
-       Err(format!("Quote moved below your floor while unlocking the keystore
-({:.8} {to} quoted, but only {:.8} {to} is guaranteed at {slippage_bps} bps
-slippage tolerance -- need > {min_floor:.8} {to}).
-
-That's not happening. No funds used.", ratio,
-           ratio * (1.0 - slippage_bps as f64 / 10_000.0)
-        ))
-    } else {
-       execute_trade_continuation(blockchain, addy, keystore_path,
-                                  registry, from, amount, fresh_quote,
-                                  slippage_bps, verbose).await
-    }
-}
-
-async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
-                                    keystore_path: &str,
-                                    registry: &TokenRegistry, from: &str,
-                                    amount: f64, fresh_quote: KyberSwap,
-                                    slippage_bps: u16, verbose: bool)
-      -> ErrStr<(String, f64)> {
-    debug!("execute_trade_continuation", verbose);
-    let signer = load_signer(blockchain, addy, keystore_path).await?;
-    let provider = err_or(Provider::<Http>::try_from(blockchain.url()),
-                          "Could not create RPC provider")?;
-    let client = SignerMiddleware::new(provider, signer);
-    let from_entry = registry.token(from)?;
-    let from_addr = from_entry.address.ok_or(format!("No address for {from}"))?;
-    let amount_base =
-       (amount * 10f64.powi(from_entry.decimals as i32)).round() as u128;
-    log!(">>> Approving exact amount ({:.6} {}) for the router", amount, from);
-    let approve_gas =
-       approve_exact_amount(&client, &from_addr, &fresh_quote.router_address,
-                            amount_base, verbose).await?;
-    log!(">>> Requesting swap calldata from KyberSwap...");
-    let (router, calldata) =
-        kyberswap_build(blockchain, &fresh_quote.route_summary_raw, addy, 
-                        slippage_bps, verbose).await?;
-    log!(">>> Sending swap transaction...");
-    let (tx_hash, swap_gas) =
-       send_swap_tx(&client, &router, &calldata, verbose).await?;
-
-    Ok((tx_hash, approve_gas + swap_gas))
 }
