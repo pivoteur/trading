@@ -11,7 +11,7 @@ use super::types::{ balances::BalanceSnapshot, stats::CumulativeStats };
 
 const LOG_TS_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
 
-fn now_ts() -> u64 {
+pub fn now_ts() -> u64 {
    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap()
 }
 

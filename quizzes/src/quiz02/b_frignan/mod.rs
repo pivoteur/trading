@@ -1,9 +1,9 @@
-use trading::{ auto_trading::query_swap, tokens::load_tokens };
+use trading::{ auto_trading::query_swap, fetchers::tokens::fetch_tokens };
 use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   string_utils::{UppercaseString, s},
+   string_utils::UppercaseString,
    currency::usd::mk_usd
 };
 use clap::Parser;
@@ -35,7 +35,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 
 async fn runoff_continuation(blockchain: &Blockchain, from_token: &str,
                              debug: bool) -> ErrStr<()> {
-    let registry = load_tokens(blockchain)?;
+    let registry = fetch_tokens(blockchain)?;
     let ans =
        query_swap(blockchain, &registry, from_token, "USDC", 1.0, debug).await?;
     let quoted_amount_out = ans.amount_out;

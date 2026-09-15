@@ -10,9 +10,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
    addresses::is_valid_evm_address,
    auto_trading::send_tokens_to_address,
-   fetchers::tokens::fetch_tokens,
-   logging::{ log_ts, append_trade_log_line },
-   wallets::wallet_balance
+   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance }
 };
 
 //======================================================
@@ -64,70 +62,61 @@ struct Args {
 // ----- SEND FN --------------------------------------------------------
 //=======================================================================
 
-#[allow(clippy::too_many_arguments)]
-async fn sendan_continuation(
-    blockchain: &Blockchain, amount: f64, token: &str, to: &str,
-    wallet_address: &str, keystore_path: &str, dry_run: bool, debug: bool)
-         -> ErrStr<()> {
-    debug!("sendan_continuation", debug);
-    let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
-    println!("mode {mode} send {amount:.8} {token} -> {to}");
-
+pub async fn runoff_with_args() -> ErrStr<()> {
+    let args = parse_args_add_banner!(Args);
+    let amount = args.amount;
     if amount <= DUST_EPSILON {
         return Err(format!("sendan: amount must be positive, got {amount}"));
     }
+    let to = &args.to_address;
     if !is_valid_evm_address(to) {
         return Err(format!(
-            "'{to}' doesn't look like an EVM address -- expected '0x' followed by 40 hex characters."
-        ));
+            "'{to}' doesn't look like an EVM address
+expected '0x' followed by 40 hex characters."));
     }
+    runoff_continuation(&args.blockchain, amount, &args.token, to,
+                        &args.wallet_address, &args.keystore_path,
+                        args.dry_run, args.debug).await
+}
 
-    let registry = load_tokens(&blockchain).await?;
+async fn runoff_continuation(blockchain: &Blockchain, amount: f64, token: &str,
+                             to: &str, addy: &str, keystore_path: &str,
+                             dry_run: bool, debug: bool) -> ErrStr<()> {
+    debug!("sendan_continuation", debug);
+    let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
+    let log_line = format!("{mode} send {amount:.8} {token} -> {to}");
+    log!("mode {}", log_line);
+
+    let registry = fetch_tokens(&blockchain).await?;
 
     // fail fast on an unknown/native token before spending an RPC call on
     // a balance check we already know can't lead anywhere.
     let entry = registry.token(token)?;
     if entry.address.is_none() {
-        return Err(format!(
-            "'{token}' has no address in data/{blockchain}.toml -- sendan only sends ERC-20s, not the native coin."
-        ));
+      return Err(format!("'{token}' has no address in data/{blockchain}.toml"));
     }
 
-    let balance = wallet_balance(wallet_address, token, &registry).await?;
-    println!("wallet {wallet_address}");
-    println!("{token} balance {balance:.8}");
+    let balance = fetch_wallet_balance(addy, token, &registry).await?;
+    log!("wallet {}", addy);
+    let log_line1 = format!("{token} {balance:.8}");
+    log!("Balance {}", log_line1);
 
     if amount > balance + DUST_EPSILON {
         return Err(format!(
-            "insufficient {token} balance: have {balance:.8}, asked to send {amount:.8} -- nothing attempted."
+            "insufficient {token} balance: have {balance:.8}, asked to send {amount:.8} -- cancelling send."
         ));
     }
 
     if dry_run {
-        println!("  WOULD SEND  {amount:.8} {token} -> {to_address}");
-        return Ok(());
+        println!("  WOULD SEND  {amount:.8} {token} -> {to}");
+    } else {
+       let (tx_hash, gas) =
+          send_tokens_to_address(addy, &registry, token, to, amount,
+                                 keystore_path, debug).await?;
+          let sent = format!("{amount:.8} {token} -> {to}, gas {gas:.5}");
+          log!("SENT {} AVAX tx {}", sent, tx_hash);
     }
-
-    match send_tokens_to_address(
-        wallet_address, &registry, token, to, amount, keystore_path, debug)
-    .await {
-        Ok((tx_hash, gas_avax)) => {
-            println!("  SENT  {amount:.8} {token} -> {to_address}   gas {gas_avax:.5} AVAX   tx {tx_hash}");
-            Ok(())
-        }
-        Err(e) => {
-            println!("  ! send failed, no funds moved: {e}");
-            Err(e)
-        }
-    }
-}
-
-pub async fn runoff_with_args() -> ErrStr<()> {
-    let args = parse_args_add_banner!(Args);
-    sendan_continuation(
-        &args.blockchain, args.amount, &args.token, &args.to_address,
-        &args.wallet_address, &args.keystore_path, args.dry_run, args.debug,
-    ).await
+    Ok(())
 }
 
 //=========================================================
@@ -179,7 +168,7 @@ mod functional_tests {
 
     run!("sendan", {
         let registry = now(load_tokens(&AVALANCHE))?;
-        let balance = now(wallet_balance("0x123", "UNDEAD", &registry))?;
+        let balance = now(fetch_wallet_balance("0x123", "UNDEAD", &registry))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
         if balance <= DUST_EPSILON {
             println!("\ttest wallet holds no UNDEAD -- confirming sendan correctly refuses to send rather than assuming a happy path");

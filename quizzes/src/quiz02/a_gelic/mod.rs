@@ -6,17 +6,15 @@ use book::{
     debug,
     parse_args_add_banner,
     cli_utils::generate_banner,
-    currency::usd::mk_usd,
+    currency::usd::{ USD, mk_usd },
     csv_utils::as_csv,
     err_utils::ErrStr,
-    file_utils::read_file,
     string_utils::s
-};[derive(Debug, Parser)]
+};
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
-suse trading::{
-   fetchers::tokens::fetch_tokens,
-   types::tokens::TokenRegistry,
-   wallets::wallet_balance
+use trading::{
+   auto_trading::query_quote,
+   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance }
 };
 
 const DUST_EPSILON: f64 = 1e-8;
@@ -29,7 +27,7 @@ fn has_balance(balance: f64) -> bool {
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.0.0")]
+#[command(version = "1.1.0")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -57,7 +55,7 @@ struct TokenBalance {
 }
 
 fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
-   let nav = mk_usd(quote.amount * amount);
+   let nav = mk_usd(quote.amount() * amount);
    TokenBalance { token: s(tok), quote, amount, nav }
 }
 
@@ -74,7 +72,7 @@ async fn read_wallet(wallet_address: &str, blockchain: &Blockchain,
     symbols.sort();
     let mut ans = Vec::new();
     for symbol in symbols {
-       match wallet_balance(wallet_address, symbol, &registry).await {
+       match fetch_wallet_balance(wallet_address, symbol, &registry).await {
           Ok(balance) if has_balance(balance) => { 
              log!("Token {}: {:.8}", symbol, balance);
              let qt = query_quote(blockchain, &registry, symbol, debug).await?;

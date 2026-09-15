@@ -3,15 +3,6 @@ use std::{
    path::Path,
    str::FromStr
 };
-use serde::Deserialize;
-use serde_json::{ Value, from_str, json };
-
-use book::{
-    debug,
-    currency::usd::{ USD, mk_usd },
-    err_utils::{ ErrStr, err_or },
-    file_utils::lines_from_file
-};
 use ethers::{
    middleware::SignerMiddleware,
    providers::{Http, Middleware, Provider},
@@ -21,26 +12,28 @@ use ethers::{
       Address, Bytes, Eip1559TransactionRequest, U256
    }
 };
-use libs::types::{ blockchains:: Blockchain, util::Id };
+use serde::Deserialize;
+use serde_json::{ Value, from_str, json };
+
+use book::{
+    debug,
+    currency::usd::{ USD, mk_usd },
+    err_utils::{ ErrStr, err_or },
+    file_utils::lines_from_file
+};
+use libs::types::{ blockchains::Blockchain, util::Id };
 
 use super::{
    clients::http_client,
+   consts::UNDEAD,
    hex::pad_address_for_call,
    logging::parse_log_ts,
+   fetchers::wallets::fetch_wallet_balance,
    types::{
-      balances::BalanceSnapshot,
       stats::CumulativeStats,
       tokens::{ TokenRegistry, TokenEntry }
-   },
-   wallets::wallet_balance
+   }
 };
-
-//============================================================================
-//----- Shared Trading Constants -----------------------------------------------
-//============================================================================
-
-pub const UNDEAD: &str = "UNDEAD";
-pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
 
 //============================================================================
 //----- Live KyberSwap Quote --------------------------------------------------
@@ -135,25 +128,6 @@ pub struct OpenPivot {
     pub prim_amount:   f64,
     pub proper:        String,
     pub proper_amount: f64,
-}
-
-pub async fn pool_balance(blockchain: &Blockchain, addy: &str,
-                          registry: &TokenRegistry, prim: &str,
-                          committed: f64, undead_committed: f64)
-      -> ErrStr<BalanceSnapshot> {
-    // Two independent reads
-    let asset_balance =
-       wallet_balance(blockchain, addy, prim, registry).await?;
-    let undead_balance =
-       wallet_balance(blockchain, addy, UNDEAD, registry).await?;
-    Ok(BalanceSnapshot {
-        asset_balance,
-        asset_committed: committed,
-        asset_available: asset_balance - committed,
-        undead_balance,
-        undead_committed,
-        undead_available: undead_balance - undead_committed,
-    })
 }
 
 // "Biggest position first" — every survey/cycle closes its largest
@@ -390,13 +364,13 @@ pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
            })
         } else {
             let balance_before =
-               wallet_balance(blockchain, addy, to, registry).await?;
+               fetch_wallet_balance(blockchain, addy, to, registry).await?;
             let (tx_hash, gas_avax) =
                execute_trade(blockchain, addy, registry, from, to, amount,
                              min_floor, slippage_bps, keystore_path,
                              debug).await?;
             let balance_after =
-               wallet_balance(blockchain, addy, to, registry).await?;
+               fetch_wallet_balance(blockchain, addy, to, registry).await?;
             let actual_received = balance_after - balance_before;
                 debug_trade_result(Some(&tx_hash), "EXECUTED", from, to,
                                    amount, &swap, min_floor, debug);
@@ -754,7 +728,8 @@ mod unit_tests {
     use super::*;
     use crate::{
        fetchers::tokens::fetch_tokens,
-       logging::{ log_misfire, log_row }
+       logging::{ log_misfire, log_row },
+       types::balances::BalanceSnapshot
     };
     use libs::types::blockchains::Blockchain::AVALANCHE;
 

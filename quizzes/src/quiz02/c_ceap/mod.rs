@@ -1,6 +1,6 @@
 use trading::{
    auto_trading::attempt_trade_with_actual_amount,
-   tokens::load_tokens
+   fetchers::tokens::fetch_tokens
 };
 use book::{
    parse_args_add_banner,
@@ -27,9 +27,9 @@ struct Args {
     /// trading to this token
     to_token: UppercaseString,
 
-    /// Minimum acceptable output amount. Required when --live is set.
-    #[arg(long)]
-    floor: Option<f64>,
+    /// Minimum acceptable output amount.
+    #[arg(long, default_value_t = 0.0)]
+    floor: f64,
 
     /// wallet address on which trade occurs
     #[arg(long, env="WALLET_ADDRESS")]
@@ -60,15 +60,15 @@ pub async fn runoff_with_args() -> ErrStr<()> {
                         args.floor, args.dry_run, args.debug).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain,
-        wallet_address: &str, keystore_path: &str,
-        from_token: &str, to_token: &str, amount: f64, floor: Option<f64>,
-        dry_run: bool, debug: bool) -> ErrStr<()> {
-    let floor = floor.unwrap_or(0.0);
-    let registry = load_tokens(blockchain)?;
-    let ans = attempt_trade_with_actual_amount(
-        blockchain, wallet_addy, &registry, from_token, to_token, amount, floor,
-        1000, keystore_path, dry_run, debug).await;
+async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
+                             keystore_path: &str, from: &str, to: &str,
+                             amount: f64, floor: f64,
+                             dry_run: bool, debug: bool) -> ErrStr<()> {
+    let registry = fetch_tokens(blockchain).await?;
+    let ans =
+        attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
+                                         amount, floor, 1000, keystore_path,
+                                         dry_run, debug).await?;
     println!("answer is {ans:?}");
     Ok(())
 }
@@ -87,5 +87,5 @@ pub mod functional_test {
 
     run!("ceap_functionality",
         now(runoff_continuation(AVALANCHE, "0x123", "xyz",
-                                "BTC", "ETH", 1.0, None, true, true))?);
+                                "BTC", "ETH", 1.0, 0.0, true, true))?);
 }

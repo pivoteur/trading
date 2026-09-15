@@ -2,10 +2,11 @@ use std::eprintln;
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
 use book::{
+   debug,
    cli_utils::generate_banner,
    err_utils::ErrStr,
    parse_args_add_banner,
-   string_utils::s
+   string_utils::{ plural, s }
 };
 use libs::types::{
    blockchains::{ Blockchain, Blockchain::AVALANCHE },
@@ -13,26 +14,25 @@ use libs::types::{
 };
 use trading::{
    auto_trading::{
-      send_tokens_to_address,
-      wallet_balance,
-      OpenPivot,
-      CumulativeStats,
-      pool_balance,
-      AttemptOutcome,
+      OpenPivot, AttemptOutcome, MisfireStage,
       attempt_trade_with_actual_amount,
       biggest_first,
       replay_log,
       report_misfire,
-      MisfireStage,
-      UNDEAD,
-      NO_REAL_FLOOR
+      send_tokens_to_address
    },
-   fetchers::tokens::fetch_tokens,
+   consts::{ UNDEAD, NO_REAL_FLOOR },
+   fetchers::{
+      pools::fetch_pool_balance,
+      tokens::fetch_tokens
+   },
    logging::{ log_open, log_close, log_misfire },
    types::{
       balances::BalanceSnapshot,
+      stats::CumulativeStats,
       tokens::TokenRegistry
-   }
+   },
+   wallets::wallet_balance
 };
 
 //----- Fixed Trade Sizes ------------------------------------------------------
@@ -122,21 +122,23 @@ fn committed_amt(token: &str, open_pivots: &[OpenPivot]) -> f64 {
 // `wallet_address`/`vault_address` are plain parameters, not resolved from
 // env in here -- only `runoff_with_args` (the CLI entrypoint) does that,
 // via `resolve_wallet_address`. See the `Args` struct below.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path: &str, log_path: &str, blockchain: &Blockchain, btc_trade_amount: f64, undead_trade_amount: f64, pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+pub async fn run_cycle(addy: &str, vault_address: &str, keystore_path: &str,
+                       log_path: &str, blockchain: &Blockchain,
+                       btc_trade_amount: f64, undead_trade_amount: f64,
+                       pct: f64, dry_run: bool, debug: bool) -> ErrStr<()> {
+    debug!("run_cycle", debug);
     let registry = fetch_tokens(blockchain).await?;
-    let ctx = mk_cycle_ctx(wallet_address, vault_address, keystore_path,
+    let ctx = mk_cycle_ctx(addy, vault_address, keystore_path,
                    log_path, blockchain, &registry, dry_run, debug);
 
-    let (open_pivots0, next_pivot_id, next_close_id, opening_stats) = replay_log_with_history_required(log_path)?;
+    let (open_pivots0, next_pivot_id, next_close_id, opening_stats) =
+          replay_log_with_history_required(log_path)?;
     let open_pivots = biggest_first(open_pivots0);
 
     let mode_tag = if ctx.dry_run { " [DRY RUN]" } else { "" };
-    if ctx.debug {
-        println!();
-        println!("tvá — {}{mode_tag} — {} open pivot(s), wallet {}", human_ts(now_ts()), open_pivots.len(), ctx.wallet_address);
-        println!();
-    }
+    let plur_opens = plural(open_pivots.len(), "open pivot");
+    let log_line0 = format!("{mode_tag} - {plur_opens}");
+    log!("tvá — {}, wallet {}", log_line0, addy);
 
     let mut state = CycleState {
         next_pivot_id,
@@ -148,72 +150,55 @@ pub async fn run_cycle(wallet_address: &str, vault_address: &str, keystore_path:
 
     let mut closed_something = false;
 
-    if ctx.debug {
-        eprintln!("surveying {} open pivot(s) this cycle", open_pivots.len());
-    }
+    log!("surveying {} this cycle", plur_opens);
     for pivot in open_pivots {
         pivot_survey(&ctx, &mut state, &mut closed_something, pivot, pct).await;
     }
 
-    if !closed_something {
-        println!("  Nothing to close this cycle — see ya in an hour!");
-    }
+    if !closed_something { println!("Nothing closed this cycle"); }
 
-    let mut snap = balance_snapshot(&ctx.wallet_address, &ctx.registry, BTC, state.committed_btc, state.committed_undead).await?;
-    if ctx.debug {
-        println!();
-        println!(
-            "Wallet's Status = BTC {:.4} in wallet ({:.4} committed, {:.4} available) | UNDEAD {:.8} in wallet ({:.8} committed, {:.8} available)",
-            snap.asset_balance, snap.asset_committed, snap.asset_available, snap.undead_balance, snap.undead_committed, snap.undead_available
-        );
-        println!();
-    }
+    let mut snap = fetch_pool_balance(addy, &registry, BTC, state.committed_btc,
+                                      state.committed_undead).await?;
+    log!("Wallet status: {}", snap.status());
 
     let mut report = OpenReport::default();
-    open_trade(&ctx, &mut state, &mut snap, &mut report, BTC, UNDEAD, btc_trade_amount).await;
-    open_trade(&ctx, &mut state, &mut snap, &mut report, UNDEAD, BTC, undead_trade_amount).await;
+    open_trade(&ctx, &mut state, &mut snap, &mut report,
+               BTC, UNDEAD, btc_trade_amount).await;
+    open_trade(&ctx, &mut state, &mut snap, &mut report, 
+               UNDEAD, BTC, undead_trade_amount).await;
 
-    assesment_report(&ctx, report.opened_something, state.running_stats, &report.skipped_reasons).await;
-
-    Ok(())
+    assesment_report(&ctx, report.opened_something, state.running_stats,
+                     &report.skipped_reasons).await
 }
 
 /// Daily-cadence status report -- a raw closes/opens tally doesn't say
 /// whether the program is doing well, so this reads as a running scoreboard
 /// against tvá's actual starting capital instead.
-async fn assesment_report(ctx: &CycleCtx, opened_something: bool, running_stats: CumulativeStats, skipped_open_reasons: &[String]) {
+async fn assesment_report(ctx: &CycleCtx, opened_something: bool, 
+                          running_stats: CumulativeStats,
+                          skipped_open_reasons: &[String]) -> ErrStr<()> {
     if !opened_something {
-        println!("  Nothing to open this cycle ({}) — see ya in an hour!", skipped_open_reasons.join("; "));
+        println!("Nothing to open this cycle:\n({})", 
+                 skipped_open_reasons.join("\n"));
     }
 
     // total_opens/total_closes are lifetime counts -- their difference is
     // exactly how many pivots are sitting open right now.
-    let open_pivots_now = running_stats.total_opens.saturating_sub(running_stats.total_closes);
+    let open_pivots_now = running_stats.open_pivots();
 
     let wallet_gas_avax =
-       wallet_balance(&ctx.wallet_address, "AVAX", &ctx.registry).await
-        .unwrap_or_else(|e| {
-            eprintln!("  ! WARNING: could not read current AVAX balance for the report ({e}) — showing 0.0.");
-            0.0
-        });
+       wallet_balance(&ctx.wallet_address, "AVAX", &ctx.registry).await?;
 
-    println!();
-    println!("started with {STARTING_UNDEAD_CAPITAL:.0} UNDEAD and {STARTING_BTC_CAPITAL:.4} BTC, and from pivoting:");
-    println!("  open pivots right now:    {open_pivots_now}");
-    println!("  pool roi:                 {:.2}%", running_stats.avg_roi() * 100.0);
-    println!("  pool apr:                 {:.2}%", running_stats.avg_apr() * 100.0);
-    println!("  total profit, UNDEAD:     {:+.8}", running_stats.total_gain_undead);
-    println!("  total profit, BTC:        {:+.4}", running_stats.total_gain_asset);
-    println!("  total gas used:           {:.5} AVAX", running_stats.total_gas_avax);
-    println!("  current gas in wallet:    {wallet_gas_avax:.5} AVAX");
+    println!("\nStarted with {STARTING_UNDEAD_CAPITAL:.0} UNDEAD
+and {STARTING_BTC_CAPITAL:.4} BTC
 
-    if running_stats.total_gain_asset < 0.0 || running_stats.total_gain_undead < 0.0 {
-        println!(
-            "  \u{26A0} WARNING: realized cumulative gain is negative — this is NOT a timing artifact, \
-             closes are actually losing money. BTC {:+.4}   UNDEAD {:+.8}",
-            running_stats.total_gain_asset, running_stats.total_gain_undead
-        );
-    }
+pivoting:
+
+  open pivots right now:    {open_pivots_now}
+{}
+  current gas in wallet:    {wallet_gas_avax:.5} AVAX", running_stats.report());
+   running_stats.mb_warning();
+   Ok(())
 }
 
 /// UNDEAD shows 8 decimals, BTC 4
@@ -227,12 +212,16 @@ fn amount_decimals(token: &str) -> usize {
 /// direction and which committed total gets credited differ. Never
 /// propagates an error -- one bad leg can't cancel the other leg or the
 /// cycle's summary report.
-async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSnapshot, report: &mut OpenReport, from: &str, to: &str, amount: f64) {
-    let available = if from == BTC { snap.asset_available } else { snap.undead_available };
+async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, 
+                    snap: &mut BalanceSnapshot, report: &mut OpenReport, 
+                    from: &str, to: &str, amount: f64) {
+    let available =
+       if from == BTC { snap.asset_available } else { snap.undead_available };
 
     if available <= amount {
         let decimals = amount_decimals(from);
-        report.skipped_reasons.push(format!("{from} free balance {available:.decimals$} <= {amount}"));
+        report.skipped_reasons
+              .push(format!("{from} free balance {available:.decimals$} <= {amount}"));
         return;
     }
 
@@ -241,7 +230,7 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
     let to_dp = amount_decimals(to);
     match attempt_trade_with_actual_amount(
        &ctx.blockchain, &ctx.wallet_address, &ctx.registry, from, to, amount,
-       NO_REAL_FLOOR, SLIPPAGE_BPS, ctx.keystore_path, ctx.dry_run, ctx.debug
+       NO_REAL_FLOOR, SLIPPAGE_BPS, &ctx.keystore_path, ctx.dry_run, ctx.debug
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
             println!("  OPENED  #{pivot_id:<4} {amount:.from_dp$} {from} -> {actual_received:.to_dp$} {to}   gas {gas_avax:.5} AVAX");
@@ -249,7 +238,7 @@ async fn open_trade(ctx: &CycleCtx, state: &mut CycleState, snap: &mut BalanceSn
             state.running_stats.total_opens += 1;
             state.running_stats.total_gas_avax += gas_avax;
 
-            match balance_snapshot(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await {
+            match pool_balance(ctx.wallet_address, ctx.registry, BTC, state.committed_btc, state.committed_undead).await {
                 Ok(fresh) => *snap = fresh,
                 Err(e) => eprintln!("  ! WARNING: pivot #{pivot_id} opened, but the post-open balance snapshot failed ({e}). Logging the open now anyway with the last-known snapshot -- re-check wallet balances by hand."),
             }
@@ -288,27 +277,28 @@ async fn pivot_survey(ctx: &CycleCtx, state: &mut CycleState,
         &ctx.keystore_path, ctx.dry_run, ctx.debug,
     ).await {
         Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
-            if ctx.dry_run { panic!("dry run should never return Executed — that would mean funds were actually moved!"); }
+            if ctx.dry_run {
+               panic!("dry run should never return Executed
+that would mean funds were actually moved!");
+            }
             let gain = actual_received - pivot.prim_amount;
             let roi = gain / pivot.prim_amount;
-            let days_held = (now_ts().saturating_sub(pivot.opened_at)) as f64 / 86_400.0;
-            let apr = if days_held > 0.0 { roi * 365.0 / days_held } else { 0.0 };
+            let time_held = now_ts() as f64 - pivot.opened_at;
+            let apr = roi * 365.0 * 86400.0 / time_held;
 
             if pivot.proper == BTC {
                 state.committed_btc -= pivot.proper_amount;
+                state.running_stats.total_gain_undead += gain;
             } else if pivot.proper == UNDEAD {
                 state.committed_undead -= pivot.proper_amount;
+                state.running_stats.total_gain_asset += gain;
+            } else {
+               panic!("Only handles BTC and UNDEAD at present!");
             }
             state.running_stats.total_closes += 1;
             state.running_stats.total_gas_avax += gas_avax;
             state.running_stats.roi_sum += roi;
             state.running_stats.apr_sum += apr;
-            if pivot.prim == UNDEAD {
-                state.running_stats.total_gain_undead += gain;
-            } else {
-                state.running_stats.total_gain_asset += gain;
-            }
-
             println!(
                 "  CLOSED  #{:<4}   opened {:.prim_dp$} {} -> {:.proper_dp$} {}   closed -> {:.prim_dp$} {}   gain {:+.prim_dp$} {}   roi {:.2}%   apr {:.2}%   gas {:.5} AVAX",
                 pivot.pivot_id, pivot.prim_amount, pivot.prim, pivot.proper_amount, pivot.proper,

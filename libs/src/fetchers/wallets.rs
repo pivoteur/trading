@@ -4,7 +4,7 @@ use serde_json::{ json, Value };
 use book::err_utils::{ ErrStr, err_or };
 use libs::types::blockchains::Blockchain;
 
-use super::{
+use crate::{
    clients::http_client,
    hex::{ hex_to_u128, pad_address_for_call },
    types::tokens::TokenRegistry
@@ -57,8 +57,9 @@ async fn native_coin_balance(blockchain: &Blockchain, addy: &str)
     hex_to_u128(&result)
 }
 
-pub async fn wallet_balance(blockchain: &Blockchain, addy: &str, symbol: &str,
-                            registry: &TokenRegistry) -> ErrStr<f64> {
+pub async fn fetch_wallet_balance(blockchain: &Blockchain, addy: &str, 
+                                  symbol: &str, registry: &TokenRegistry)
+      -> ErrStr<f64> {
     let entry = registry.token(symbol)?;
     let raw = if entry.native {
         native_coin_balance(blockchain, addy).await?
@@ -89,7 +90,7 @@ mod functional_tests {
        let ava = &AVALANCHE;
        let registry = fetch_tokens(ava).await?;
        let balance =
-          wallet_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
+          fetch_wallet_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
        println!("Test wallet {tok}{hdr} balance: {balance:.8}");
        Ok(())
     }

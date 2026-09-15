@@ -4,18 +4,16 @@ use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   string_utils::{UppercaseString, s}
+   string_utils::UppercaseString
 };
 use libs::types::blockchains::Blockchain;
 use trading::{
    auto_trading::{
-      query_swap, 
-      AttemptOutcome, attempt_trade_with_actual_amount,
-      NO_REAL_FLOOR, UNDEAD
+      AttemptOutcome, attempt_trade_with_actual_amount, query_swap
    },
-   fetchers::tokens::fetch_tokens,
-   logging::{ log_ts, append_trade_log_line },
-   wallets::wallet_balance
+   consts::{ NO_REAL_FLOOR, UNDEAD },
+   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance },
+   logging::{ log_ts, append_trade_log_line }
 };
 
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
@@ -31,35 +29,41 @@ const TRADE_LOG_HEADER: &'static str = "timestamp\tmode\ttoken\tundead_balance\t
 #[derive(Debug, Parser)]
 #[command(version = "1.1.0")]
 struct Args {
+
     /// Blockchain on which trade occurs 
     blockchain: Blockchain,
+
     /// non-UNDEAD side of the pair, e.g. `BTC`
     token: UppercaseString,
+
     /// defaults to the vault -- override to run against any
     /// other wallet, as long as its tokens are in data/{blockchain}.toml
     #[arg(long, env = "VAULT_ADDRESS")]
     wallet_address: String,
+
     /// defaults to the vault -- override alongside --wallet-address
     #[arg(long, env = "VAULT_KEYSTORE_PATH")]
     keystore_path: String,
-    #[arg(long, default_value_t = false)]
-    dry_run: bool,
-    #[arg(short = 'd', long, default_value_t = false)]
-    debug: bool,
+
+    /// inverse slippage allowed
     #[arg(long, default_value_t = DEFAULT_SLIPPAGE_BPS)]
     slippage_bps: u16,    
+
+    /// dry run; do not execute
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+
+    /// show debugging information
+    #[arg(short = 'd', long, default_value_t = false)]
+    debug: bool
 }
 
-#[allow(clippy::too_many_arguments)]
-fn log_run(
-    mode: &str, token: &str, undead_balance: f64, token_balance: f64,
-    token_value_in_undead: f64, swap_undead: f64, outcome: &str,
-    actual_received: f64, gas_avax: f64, tx_hash: &str,
-) {
+fn log_run(mode: &str, token: &str, undead_balance: f64, token_balance: f64,
+           token_value_in_undead: f64, swap_undead: f64, outcome: &str,
+           actual_received: f64, gas_avax: f64, tx_hash: &str) {
     let line = format!(
         "{}\t{mode}\t{token}\t{undead_balance:.8}\t{token_balance:.8}\t{token_value_in_undead:.8}\t{swap_undead:.8}\t{outcome}\t{actual_received:.8}\t{gas_avax:.8}\t{tx_hash}",
-        log_ts(now_ts())
-    );
+        log_ts());
     append_trade_log_line(TRADE_LOG_PATH, &line, Some(TRADE_LOG_HEADER));
 }
 
@@ -84,11 +88,11 @@ async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault_address
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
     println!("mode {mode} token {token}");
 
-    let registry = load_tokens(blockchain).await?;
+    let registry = fetch_tokens(blockchain).await?;
 
     let (undead_balance, token_balance) = tokio::try_join!(
-        wallet_balance(vault_address, UNDEAD, &registry),
-        wallet_balance(vault_address, token, &registry),
+        fetch_wallet_balance(vault_address, UNDEAD, &registry),
+        fetch_wallet_balance(vault_address, token, &registry),
     )?;
     println!("wallet {vault_address}");
     println!("UNDEAD balance {undead_balance:.8}");
