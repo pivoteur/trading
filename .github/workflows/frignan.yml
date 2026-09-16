@@ -1,0 +1,106 @@
+name: frignan
+description: "Reads a token's price-quote from the blockchain"
+
+on:
+  workflow_dispatch:
+    inputs:
+      blockchain:
+        description: "The blockchain from which to read the token's price"
+        type: choice
+        options:
+          - Avalanche
+          - Binance
+        default: Avalanche
+      token:
+        description: "Which token to price-quote"
+        type: string
+        default: BTC
+      debug:
+        description: "Show in-process work"
+        type: boolean
+        default: false
+
+env:
+  DAPP: frignan
+
+jobs:
+  run-frignan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Load Shared Environment Variables
+        uses: doughepi/yaml-env-action@v1.0.0
+        with:
+          files: trading/.github/config/trading-env.yml
+
+      - name: Establish app path
+        run: echo "DAPP_DIR=$DAPPS_DIR/$DAPP" >> $GITHUB_ENV
+
+      - name: Establish git path
+        run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
+
+      - name: Checkout trading
+        uses: actions/checkout@v4
+        with:
+          path: trading
+
+      - name: Cache frignan binary
+        id: binary-cache
+        uses: actions/cache@v4
+        with:
+          path: trading/dapps/frignan/target/release/frignan
+          key: >-
+            frignan-binary-
+            ${{ hashFiles(format('{0}/quiz02/b_frignan/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
+            ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
+            ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
+
+      - name: Install Rust toolchain
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout protocol
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: pivoteur/protocol
+          path: protocol
+          ref: main
+
+      - name: Checkout crypto-n-rust
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: logicalgraphs/crypto-n-rust
+          path: crypto-n-rust
+
+      - name: Build frignan
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --manifest-path $DAPP_DIR/Cargo.toml --release
+
+      - name: Add frignan to PATH
+        run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
+
+      - name: salutation
+        run: $DAPP --help
+
+      - name: Show input parameters
+        run: |
+          echo "=== Running frignan with manual inputs ==="
+          echo "blockchain: ${{ inputs.blockchain }}"
+          echo "token:      ${{ inputs.token }}"
+          echo "debug:      ${{ inputs.debug }}"
+
+      - name: run frignan
+        run: |
+          ARGS = ""
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            ARGS="--debug"
+          fi
+          ARGS="$ARGS --blockchain ${{ inputs.blockchain }} ${{ inputs.token }}"
+          echo "=== Running $DAPP with args $ARGS ==="
+          $DAPP $ARGS
