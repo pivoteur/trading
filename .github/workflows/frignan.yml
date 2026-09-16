@@ -97,7 +97,7 @@ jobs:
 
       - name: run frignan
         run: |
-          ARGS = ""
+          ARGS=""
           if [ "${{ inputs.debug }}" = "true" ]; then
             ARGS="--debug"
           fi
