@@ -35,3 +35,10 @@ $ cargo run binance BTC 1 USDT --live --floor 63000
 - A `<blockchain>.toml` token registry file must exist alongside the binary, listing each token's address and decimals.
 
 Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
+
+-----
+
+## Revision history
+
+* 1.1.0, 2026-09-15: library-refactoring
+* 1.0.0, 2026-08-20: released

@@ -1,24 +1,18 @@
 # dapps
 Contains the decentralized applications to automate trades.
 
-## `tvá`
- * An auto-trader that pivots `$BTC` and `$UNDEAD` every hour.
-
-## `arbitrage`
- * An all-or-nothing auto-trader for calls.csv.
-
-## `maegen`
+## [ `maegen` ](maegen)
  * A prorgam tired to a specified wallet and balances a token
  passed in with `$UNDEAD`, balancing the dollar value that is.
 
-## `sendan` 
+## [ `sendan` ](sendan)
  * A simple prorgam that send a desired amount of token x to a
  wallet passed in.
 
-## `frignan`
+## [ `frignan` ](frignan)
  * A price checker for the desired token on a desired blockchain.
 
-## `ceap`
+## [ `ceap` ](ceap)
  * An auto-trader that trades any token to any token at a specified 
  amount and on any blockchain, all passed in. 
 
@@ -56,3 +50,12 @@ Verify all dependencies are set by running these commands:
    * e.g. : KEYSTORE_PASSWORD
  * export the `wallet address` and the `~/.foundry/keystores/<name>` path, locally within `~/.bashrc`
    * So that, you can run these dapps locally, if you want.
+
+## dapps on standby
+
+* [ `tvá` ](wip/tva)
+ * An auto-trader that pivots `$BTC` and `$UNDEAD` every hour.
+
+* [ `arbitrage` ](wip/arbitrage)
+ * An all-or-nothing auto-trader for calls.csv.
+

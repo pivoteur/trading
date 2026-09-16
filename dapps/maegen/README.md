@@ -60,5 +60,6 @@ equal UNDEAD-denominated value:
 
 ## Revisions
 
+* 1.2.0, 2026-09-15: library refactoring
 * 1.1.0, 2026-08-24: not only in prod how corrected the keystore_path 
 misreading on real runs. Also defaulted to the `VAULT_ADDRESS`, not `tva`'s

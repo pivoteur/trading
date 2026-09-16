@@ -16,7 +16,7 @@ use clap::Parser;
 //===============================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.0.0")]
+#[command(version = "1.1.0")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -86,6 +86,6 @@ pub mod functional_test {
     create_testing!("quiz02::c_ceap");
 
     run!("ceap_functionality",
-        now(runoff_continuation(AVALANCHE, "0x123", "xyz",
+        now(runoff_continuation(&AVALANCHE, "0x123", "xyz",
                                 "BTC", "ETH", 1.0, 0.0, true, true))?);
 }

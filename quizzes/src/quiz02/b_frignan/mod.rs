@@ -14,7 +14,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.2.5")]
+#[command(version = "1.2.0")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -35,7 +35,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 
 async fn runoff_continuation(blockchain: &Blockchain, from_token: &str,
                              debug: bool) -> ErrStr<()> {
-    let registry = fetch_tokens(blockchain)?;
+    let registry = fetch_tokens(blockchain).await?;
     let ans =
        query_swap(blockchain, &registry, from_token, "USDC", 1.0, debug).await?;
     let quoted_amount_out = ans.amount_out;
@@ -57,10 +57,10 @@ pub mod functional_test {
     create_testing!("quiz02::b_frignan");
 
     run!("frignan_btc", {
-        now(runoff_continuation(AVALANCHE, "BTC", true))?
+        now(runoff_continuation(&AVALANCHE, "BTC", true))?
     });
 
     run!("frignan_undead", {
-        now(runoff_continuation(AVALANCHE, "UNDEAD", false))?
+        now(runoff_continuation(&AVALANCHE, "UNDEAD", false))?
     });
 }

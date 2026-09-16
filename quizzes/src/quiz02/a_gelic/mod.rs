@@ -61,22 +61,23 @@ fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
 
 //----- Wallet Read ---------------------------------------------
 
-async fn read_wallet(wallet_address: &str, blockchain: &Blockchain,
+async fn read_wallet(addy: &str, blockchain: &Blockchain,
                          debug: bool) -> ErrStr<Vec<TokenBalance>> {
     debug!("read_wallet", debug);
-    let registry = fetch_tokens(&blockchain)?;
+    let registry = fetch_tokens(&blockchain).await?;
 
-    log!("wallet {} on {}", wallet_address, blockchain);
+    log!("wallet {} on {}", addy, blockchain);
 
-    let mut symbols: Vec<String> = registry.keys().collect();
+    let map = registry.as_map();
+    let mut symbols: Vec<&String> = map.keys().collect();
     symbols.sort();
     let mut ans = Vec::new();
     for symbol in symbols {
-       match fetch_wallet_balance(wallet_address, symbol, &registry).await {
+       match fetch_wallet_balance(blockchain, addy, symbol, &registry).await {
           Ok(balance) if has_balance(balance) => { 
              log!("Token {}: {:.8}", symbol, balance);
              let qt = query_quote(blockchain, &registry, symbol, debug).await?;
-             let bal = mk_token_balance(symbol, qt, balance);
+             let bal = mk_token_balance(symbol, qt, balance as f32);
              ans.push(bal);
           },
           Ok(_) => {
@@ -94,6 +95,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let balances =
        read_wallet(&args.wallet_address, &args.blockchain, args.debug).await?;
     println!("{}", as_csv(&balances, true)?);
+    Ok(())
 }
 
 //----- UNIT TESTS -------------------------------------------------------------
@@ -120,11 +122,8 @@ mod unit_tests {
 pub mod functional_tests {
     use super::*;
     use paste::paste;
-    use book::{
-        create_testing,
-        types::blockchains::Blockchain::BINANCE,
-        utils::now
-    };
+    use book::{ create_testing, utils::now };
+    use libs::types::blockchains::Blockchain::BINANCE;
 
     /// Fixed, hardcoded dummy test address -- never read from env.
     const TEST_GLAZEL_ADDRESS: &str =
@@ -133,12 +132,12 @@ pub mod functional_tests {
     create_testing!("quiz02::a_gelic");
 
     run!("read_wallet_avalanche", {
-        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, AVALANCHE, true))?;
+        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, &AVALANCHE, true))?;
         println!("{}", as_csv(&bal, true)?);
     });
 
     run!("read_wallet_binance", {
-        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, BINANCE, true))?;
+        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, &BINANCE, true))?;
         println!("{}", as_csv(&bal, true)?);
     });
 }
