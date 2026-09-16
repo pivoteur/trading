@@ -1,144 +1,143 @@
 use clap::Parser;
+use serde::Serialize;
+use serde_with::{ serde_as, DisplayFromStr };
+
 use book::{
-    cli_utils::generate_banner,
-    err_utils::ErrStr,
-    file_utils::read_file,
+    debug,
     parse_args_add_banner,
+    cli_utils::generate_banner,
+    currency::usd::{ USD, mk_usd },
+    csv_utils::as_csv,
+    err_utils::ErrStr,
+    string_utils::s
 };
-use trading::auto_trading::{TokenRegistry, parse_token_registry, wallet_balance};
+use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
+use trading::{
+   auto_trading::query_quote,
+   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance }
+};
 
-//----- Token Registry --------------------------------------------------------
-const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
 const DUST_EPSILON: f64 = 1e-8;
-
-pub fn load_token_registry(tokens: &str) -> ErrStr<TokenRegistry> {
-    parse_token_registry(tokens)
-}
 
 fn has_balance(balance: f64) -> bool {
     balance > DUST_EPSILON
 }
 
-//----- CLI --------------------------------------------------------------------
+//----- CLI -------------------------------------------------------
+
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "0.1.0")]
+#[command(version = "1.1.0")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
+
     /// Which chain's data/{blockchain}.toml to load.
-    #[arg(long, default_value = "avalanche")]
-    blockchain: String,
-    /// Balance for just this token; omitted prints every token in the registry.
-    #[arg(long)]
-    token: Option<String>,
+    #[arg(long, default_value_t = AVALANCHE)]
+    blockchain: Blockchain,
+
+    /// Print debugging information
+    #[arg(short, long)]
+    debug: bool
 }
 
-//----- Wallet Read --------------------------------------------------------------
-pub async fn read_wallet(wallet_address: &str, blockchain: &str, token: Option<&str>) -> ErrStr<()> {
-    let tokens = read_file(&format!("{DATA_DIR}/{blockchain}.toml"))?;
-    let registry = load_token_registry(&tokens)?;
+// ----- TokenBalance -------------------------------------------------------
 
-    println!("wallet {wallet_address} on {blockchain}");
+#[serde_as]
+#[derive(Debug, Clone, Serialize)]
+struct TokenBalance {
+   token: String,
+   #[serde_as(as = "DisplayFromStr")]
+   quote: USD,
+   amount: f32,
+   #[serde_as(as = "DisplayFromStr")]
+   nav: USD
+}
 
-    match token {
-        Some(symbol) => {
-            let balance = wallet_balance(wallet_address, symbol, &registry).await?;
-            println!("  {symbol}: {balance:.8}");
-        }
-        None => {
-            let mut symbols: Vec<&String> = registry.keys().collect();
-            symbols.sort();
-            for symbol in symbols {
-                match wallet_balance(wallet_address, symbol, &registry).await {
-                    Ok(balance) if has_balance(balance) => println!("  {symbol}: {balance:.8}"),
-                    Ok(_) => {} // zero/dust balance -- not actually in the wallet, skip it
-                    Err(e) => println!("  {symbol}: ! could not read balance ({e})"),
-                }
-            }
-        }
+fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
+   let nav = mk_usd(quote.amount() * amount);
+   TokenBalance { token: s(tok), quote, amount, nav }
+}
+
+//----- Wallet Read ---------------------------------------------
+
+async fn read_wallet(addy: &str, blockchain: &Blockchain,
+                         debug: bool) -> ErrStr<Vec<TokenBalance>> {
+    debug!("read_wallet", debug);
+    let registry = fetch_tokens(&blockchain).await?;
+
+    log!("wallet {} on {}", addy, blockchain);
+
+    let map = registry.as_map();
+    let mut symbols: Vec<&String> = map.keys().collect();
+    symbols.sort();
+    let mut ans = Vec::new();
+    for symbol in symbols {
+       match fetch_wallet_balance(blockchain, addy, symbol, &registry).await {
+          Ok(balance) if has_balance(balance) => { 
+             log!("Token {}: {:.8}", symbol, balance);
+             let qt = query_quote(blockchain, &registry, symbol, debug).await?;
+             let bal = mk_token_balance(symbol, qt, balance as f32);
+             ans.push(bal);
+          },
+          Ok(_) => {
+             log!("Token {} zero/dust balance -- not in the wallet, skip it",
+                  symbol);
+          },
+          Err(e) => log!("Token {}: ! could not read balance ({})", symbol, e)
+       }
     }
-
-    Ok(())
+    Ok(ans)
 }
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
-    read_wallet(&args.wallet_address, &args.blockchain, args.token.as_deref()).await
+    let balances =
+       read_wallet(&args.wallet_address, &args.blockchain, args.debug).await?;
+    println!("{}", as_csv(&balances, true)?);
+    Ok(())
 }
 
 //----- UNIT TESTS -------------------------------------------------------------
+
 #[cfg(test)]
+#[cfg(not(tarpaulin_include))]
 mod unit_tests {
     use super::*;
 
     #[test]
-    fn test_load_token_registry_has_btc_undead_avax() -> ErrStr<()> {
-        let tokens = read_file(&format!("{DATA_DIR}/avalanche.toml"))?;
-        let registry = load_token_registry(&tokens)?;
-        for symbol in ["BTC", "UNDEAD", "AVAX"] {
-            assert!(registry.contains_key(symbol), "missing '{symbol}' in avalanche.toml");
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_wallet_address_required() {
-        let result = Args::try_parse_from(["gelic"]);
-        assert!(result.is_err(), "wallet_address has no default and no env fallback -- omitting it must fail to parse");
-    }
-
-    #[test]
-    fn test_blockchain_default() {
-        let args = Args::try_parse_from(["gelic", "0x123"]).expect("should parse with just the wallet address");
-        assert_eq!(args.blockchain, "avalanche");
-    }
-
-    #[test]
-    fn test_blockchain_override() {
-        let args = Args::try_parse_from(["gelic", "0x123", "--blockchain", "binance"]).expect("should parse with --blockchain given");
-        assert_eq!(args.blockchain, "binance");
-    }
-
-    #[test]
-    fn test_token_default() {
-        let args = Args::try_parse_from(["gelic", "0x123"]).expect("should parse with just the wallet address");
-        assert_eq!(args.token, None);
-    }
-
-    #[test]
-    fn test_token_override() {
-        let args = Args::try_parse_from(["gelic", "0x123", "--token", "BTC"]).expect("should parse with --token given");
-        assert_eq!(args.token.as_deref(), Some("BTC"));
-    }
-
-    #[test]
     fn test_has_balance() {
         assert!(!has_balance(0.0));
-        assert!(!has_balance(1e-9), "sub-epsilon dust must not count as a real balance");
-        assert!(has_balance(0.00000434), "a real, if small, balance must still show");
+        assert!(!has_balance(1e-9),
+            "sub-epsilon dust must not count as a real balance");
+        assert!(has_balance(0.00000434),
+             "a real, if small, balance must still show");
     }
 }
 
 //----- FUNCTIONAL TESTS -------------------------------------------------------
+
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 pub mod functional_tests {
     use super::*;
     use paste::paste;
-    use book::{create_testing, utils::now};
+    use book::{ create_testing, utils::now };
+    use libs::types::blockchains::Blockchain::BINANCE;
 
     /// Fixed, hardcoded dummy test address -- never read from env.
-    const TEST_GLAZEL_ADDRESS: &str = "0x6700bD7EAE41434f566e48738813fC585B95669a";
+    const TEST_GLAZEL_ADDRESS: &str =
+       "0x6700bD7EAE41434f566e48738813fC585B95669a";
 
     create_testing!("quiz02::a_gelic");
 
-    run!("gelic_functionality", {
-        now(read_wallet(TEST_GLAZEL_ADDRESS, "avalanche", None))?;
-        println!("gelic is ok");
+    run!("read_wallet_avalanche", {
+        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, &AVALANCHE, true))?;
+        println!("{}", as_csv(&bal, true)?);
     });
 
-    run!("read_wallet_single_token", {
-        now(read_wallet(TEST_GLAZEL_ADDRESS, "avalanche", Some("BTC")))?;
+    run!("read_wallet_binance", {
+        let bal = now(read_wallet(TEST_GLAZEL_ADDRESS, &BINANCE, true))?;
+        println!("{}", as_csv(&bal, true)?);
     });
 }

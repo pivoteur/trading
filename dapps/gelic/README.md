@@ -26,4 +26,5 @@ to read.
 
 ## Revisions
 
+* 1.1.0, 2026-09-15: library-refactoring
 * 0.1.0, 2026-09-04: The initial build of `gelic` with some simple tests. 

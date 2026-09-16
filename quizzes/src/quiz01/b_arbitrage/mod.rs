@@ -1,40 +1,38 @@
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+   collections::HashSet,
+   fs::OpenOptions,
+   io::Write,
+   path::Path,
+   time::{SystemTime, UNIX_EPOCH}
+};
 use clap::{Parser, Subcommand};
 use book::{
-        cli_utils::generate_banner,
-        err_utils::ErrStr,
-        parse_args_add_banner,
+   debug,
+   parse_args_add_banner,
+   cli_utils::generate_banner,
+   err_utils::ErrStr,
+   string_utils::plural
 };
 use libs::{
-        fetchers::calls::fetch_calls,
-        types::calls::Call,
+   fetchers::calls::fetch_calls,
+   types::{ blockchains::Blockchain::AVALANCHE, calls::Call }
 };
-use trading::auto_trading::{
-                TokenRegistry, parse_token_registry, token_entry,
-                wallet_address_from_env, wallet_balance, query_swap, execute_trade,
-                balance_snapshot, BalanceSnapshot,
-                AttemptOutcome, attempt_trade_with_actual_amount,
-                biggest_first, now_ts, replay_log, log_open, log_close,
-                UNDEAD, NO_REAL_FLOOR,
+use trading::{
+   auto_trading::{
+      query_swap, execute_trade, pool_balance, biggest_first,
+      AttemptOutcome, attempt_trade_with_actual_amount, replay_log,
+      UNDEAD, NO_REAL_FLOOR
+   },
+   fetchers::tokens::fetch_tokens,
+   logging::{ log_open, log_close },
+   types::{ balances::BalanceSnapshot, tokens::TokenRegistry },
+   wallets::wallet_balance
 };
 
 //============================================================================
-//----- Token Registry --------------------------------------------------------
+//----- Constants ------------------------------------------------------------
 //============================================================================
-/// address is ever inferred or looked up live, for any subcommand.
-/// contract addresses are hardcoded in tokens.toml, which is compiled into the binary
-const TOKENS_TOML: &str = include_str!("tokens.toml");
 
-pub fn load_token_registry() -> ErrStr<TokenRegistry> {
-    parse_token_registry(TOKENS_TOML)
-}
-
-//============================================================================
-//----- Constants ---------------------------------------------------------------
-//============================================================================
 const DEFAULT_SLIPPAGE_BPS: u16 = 50;
 /// Env var holding the path to arbitrage's own encrypted keystore file —
 /// kept as one named constant rather than repeating the literal at each
@@ -42,7 +40,7 @@ const DEFAULT_SLIPPAGE_BPS: u16 = 50;
 const KEYSTORE_PATH_VAR: &str = "KEYSTORE_PATH";
 
 //============================================================================
-//----- Per-Pool Trade Log — path & header --------------------------------------
+//----- Per-Pool Trade Log — path & header -----------------------------------
 //============================================================================
 /// Every pool gets its own log file, named after its non-UNDEAD token,
 /// living alongside this binary's other data — e.g.
@@ -129,7 +127,7 @@ async fn run_pool_cycle(
 
     for pivot in open_pivots {
         match attempt_trade_with_actual_amount(
-            "avalanche", wallet_address, registry, &pivot.proper, &pivot.prim,
+            &AVALANCHE, wallet_address, registry, &pivot.proper, &pivot.prim,
             pivot.proper_amount, pivot.prim_amount, DEFAULT_SLIPPAGE_BPS, KEYSTORE_PATH_VAR, dry_run, debug,
         ).await {
             Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax }) => {
@@ -215,9 +213,9 @@ async fn run_pool_cycle(
 /// Opens are wired up per-pool via open_trade_amount but every pool
 /// currently returns None there, so this only ever closes until amounts
 /// are configured — see the note on open_trade_amount above.
-pub async fn run_survey(dry_run: bool, debug: bool) -> ErrStr<()> {
-    let wallet_address = wallet_address_from_env("WALLET_ADDRESS")?;
-    let registry = load_token_registry()?;
+pub async fn run_survey(wallet_address: &str, dry_run: bool, debug: bool)
+       -> ErrStr<()> {
+    let registry = fetch_tokens(&AVALANCHE).await?;
     let mode_tag = if dry_run { " [DRY RUN]" } else { "" };
 
     println!("arbitrage — full survey{mode_tag} — wallet {wallet_address}");
@@ -231,9 +229,8 @@ pub async fn run_survey(dry_run: bool, debug: bool) -> ErrStr<()> {
     let mut any_opened = false;
     let mut healths: Vec<(String, BalanceSnapshot)> = Vec::new();
     for token in &pools {
-        if token_entry(&registry, token).is_err() {
-            println!();
-            println!("== {token} <-> UNDEAD ==");
+        if registry.token(token).is_err() {
+            println!("\n== {token} <-> UNDEAD ==");
             println!("  SKIPPED: '{token}' has a log but is no longer in tokens.toml");
             continue;
         }
@@ -246,7 +243,8 @@ pub async fn run_survey(dry_run: bool, debug: bool) -> ErrStr<()> {
     if !pools.is_empty() {
         println!();
         if !any_closed && !any_opened {
-            println!("Nothing to close or open across {} pool(s) this cycle — see ya next time!", pools.len());
+            println!("Nothing to close or open across {} this cycle",
+                     plural(pools.len(), "pool"));
         }
     }
 
@@ -277,8 +275,7 @@ async fn print_wallet_health(
     registry: &TokenRegistry,
     pool_healths: &[(String, BalanceSnapshot)],
 ) -> ErrStr<()> {
-    println!();
-    println!("== Wallet Health ==");
+    println!("\n== Wallet Health ==");
 
     for (token, snap) in pool_healths {
         println!(
@@ -287,9 +284,10 @@ async fn print_wallet_health(
         );
     }
 
-    let pool_tokens: std::collections::HashSet<&str> =
+    let pool_tokens: HashSet<&str> =
         pool_healths.iter().map(|(t, _)| t.as_str()).collect();
     let mut other_tokens: Vec<&str> = registry
+        .as_map()
         .keys()
         .map(|s| s.as_str())
         .filter(|s| *s != UNDEAD && !pool_tokens.contains(s))
@@ -298,7 +296,7 @@ async fn print_wallet_health(
 
     for token in &other_tokens {
         let balance = wallet_balance(wallet_address, token, registry).await?;
-        println!("  {:<8} balance {:.6}   (not yet bootstrapped into a pool)", token, balance);
+        println!("  {token:<8} balance {balance:.6}   (not yet bootstrapped into a pool)");
     }
 
     println!("  --");
@@ -306,9 +304,9 @@ async fn print_wallet_health(
         let undead_balance = pool_healths[0].1.undead_balance;
         let total_committed: f64 = pool_healths.iter().map(|(_, s)| s.undead_committed).sum();
         println!(
-            "  {:<8} balance {:.6}   total committed {:.6} (across {} pool{})   available {:.6}",
-            UNDEAD, undead_balance, total_committed, pool_healths.len(),
-            if pool_healths.len() == 1 { "" } else { "s" },
+            "  {:<8} balance {:.6}   total committed {:.6} (across {})   available {:.6}",
+            UNDEAD, undead_balance, total_committed, 
+            plural(pool_healths.len(), "pool"),
             undead_balance - total_committed
         );
     } else {
@@ -316,7 +314,8 @@ async fn print_wallet_health(
         // real UNDEAD balance so "what's available to bootstrap with" has
         // an actual answer instead of UNDEAD silently vanishing from the
         // table entirely.
-        let undead_balance = wallet_balance(wallet_address, UNDEAD, registry).await?;
+        let undead_balance =
+           wallet_balance(wallet_address, UNDEAD, registry).await?;
         println!(
             "  {:<8} balance {:.6}   (no pools open yet — nothing committed)",
             UNDEAD, undead_balance
@@ -336,16 +335,17 @@ async fn print_wallet_health(
 /// re-quoting independently would just ask the same question again (and
 /// could drift from what pivot one actually executed at). Both pivots land
 /// in the new pool's log as their own OPEN pivots.
-pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
+pub async fn run_new(wallet_address: &str, token: &str, amount: f64,
+                     slippage_bps: u16, dry_run: bool, debug: bool)
+      -> ErrStr<()> {
     let token = token.to_uppercase();
     if amount <= 0.0 {
         return Err("amount must be greater than zero".to_string());
     }
 
-    let wallet_address = wallet_address_from_env("WALLET_ADDRESS")?;
-    let registry = load_token_registry()?;
+    let registry = load_tokens(&AVALANCHE).await?;
 
-    if token_entry(&registry, &token).is_err() {
+    if registry.token(token).is_err() {
         return Err(format!(
             "'{token}' is not in tokens.toml — add its address and decimals there first. No funds moved."
         ));
@@ -366,7 +366,8 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 1: TOKEN -> UNDEAD
     let undead_received = match attempt_trade_with_actual_amount(
-        "avalanche", &wallet_address, &registry, &token, UNDEAD, amount, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
+        &AVALANCHE, &wallet_address, &registry, &token, UNDEAD, amount,
+        NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {amount:.8} {token} -> {actual_received:.2} UNDEAD   gas {gas_avax:.5} AVAX");
@@ -389,7 +390,7 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 
     // Pivot 2: UNDEAD -> TOKEN, using exactly what pivot 1 returned — not a fresh quote.
     match attempt_trade_with_actual_amount(
-        "avalanche", &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
+        &AVALANCHE, &wallet_address, &registry, UNDEAD, &token, undead_received, NO_REAL_FLOOR, slippage_bps, KEYSTORE_PATH_VAR, dry_run, debug,
     ).await? {
         AttemptOutcome::Executed { tx_hash, actual_received, gas_avax } => {
             println!("  OPENED  #{next_pivot_id:<4} {undead_received:.2} UNDEAD -> {actual_received:.8} {token}   gas {gas_avax:.5} AVAX");
@@ -426,7 +427,10 @@ pub async fn run_new(token: &str, amount: f64, slippage_bps: u16, dry_run: bool,
 // per-pool TSV logs new/survey use for the continuous UNDEAD pivot system.
 const AD_HOC_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/arbitrage_trades.log");
 
-fn log_trade_outcome(from_symbol: &str, to_symbol: &str, amount: f64, quote_out: f64, tx_hash: &str) {
+fn log_trade_outcome(from_symbol: &str, to_symbol: &str, amount: f64,
+                     quote_out: f64, tx_hash: &str, debug: bool) {
+    debug!("log_trade_outcome", debug);
+    log!("logging trade outcome");
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -440,21 +444,15 @@ fn log_trade_outcome(from_symbol: &str, to_symbol: &str, amount: f64, quote_out:
         .open(AD_HOC_LOG_PATH)
         .and_then(|mut f| f.write_all(line.as_bytes()));
     if let Err(e) = result {
-        eprintln!("Warning: could not write to trade log ({AD_HOC_LOG_PATH}): {e}");
+        log!("Warning: could not write to trade log ({})", AD_HOC_LOG_PATH);
     }
 }
 
-async fn run_trade_for_symbols(
-    wallet_address: &str,
-    registry: &TokenRegistry,
-    from_symbol: &str,
-    to_symbol: &str,
-    amount: f64,
-    min_floor: f64,
-    slippage_bps: u16,
-    dry_run: bool,
-    debug: bool,
-) -> ErrStr<()> {
+async fn run_trade_for_symbols(addy: &str, registry: &TokenRegistry,
+                               from: &str, to: &str, amount: f64,
+                               min_floor: f64, slippage_bps: u16,
+                               dry_run: bool, debug: bool) -> ErrStr<()> {
+    debug!("run_trade_for_symbols", debug);
     if amount <= 0.0 {
         return Err("amount must be greater than zero".to_string());
     }
@@ -462,22 +460,23 @@ async fn run_trade_for_symbols(
         return Err("min_floor must be greater than zero".to_string());
     }
 
-    let available = wallet_balance(wallet_address, from_symbol, registry).await?;
-    println!("Wallet ({wallet_address}): {available:.6} {from_symbol} available");
+    let available = wallet_balance(wallet_address, from, registry).await?;
+    println!("Wallet ({wallet_address}): {available:.6} {from} available");
     if available + 1e-6 < amount {
         return Err(format!(
-            "Insufficient {from_symbol} — need {amount:.6}, only {available:.6} available. \
+            "Insufficient {from} — need {amount:.6}, only {available:.6} available. \
              That's not happening. No funds used."
         ));
     }
 
-    let swap = query_swap("avalanche", registry, from_symbol, to_symbol, amount, debug).await?;
-    println!("Live swap: {amount:.6} {from_symbol} -> {:.8} {to_symbol} right now", swap.amount_out);
-    println!("Your floor: {min_floor:.8} {to_symbol}");
+    let swap = query_swap(&AVALANCHE, registry, from, to, amount, debug).await?;
+    println!("Live swap: {amount:.6} {from} -> {:.8} {to} right now",
+             swap.amount_out);
+    println!("Your floor: {min_floor:.8} {to}");
 
     if swap.amount_out < min_floor {
         return Err(format!(
-            "Swap ({:.8} {to_symbol}) is below your floor ({min_floor:.8} {to_symbol}). \
+            "Swap ({:.8} {to}) is below your floor ({min_floor:.8} {to}). \
              That's not happening. No funds used.",
             swap.amount_out
         ));
@@ -492,39 +491,44 @@ async fn run_trade_for_symbols(
         println!(">>> Swap clears your floor. Proceeding to execute.");
     }
 
-    match execute_trade("avalanche", wallet_address, registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, KEYSTORE_PATH_VAR, debug).await {
-        Ok((tx_hash, _gas_avax)) => {
-            println!(">>> Trade complete. Tx hash: {tx_hash}");
-            log_trade_outcome(from_symbol, to_symbol, amount, swap.amount_out, &tx_hash);
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    let (tx_hash, _gas) =
+       execute_trade(&AVALANCHE, wallet_address, registry,
+                     from, to, amount, min_floor, slippage_bps,
+                     KEYSTORE_PATH_VAR, debug).await?;
+    println!(">>> Trade complete. Tx hash: {tx_hash}");
+    log_trade_outcome(from, to, amount, swap.amount_out, &tx_hash);
+    Ok(())
 }
 
 /// Closes (or opens — direction is whatever the row says, pivot_token ->
-/// proposed_token) exactly one row from calls.csv; amount/min_floor are yours to set,
-/// independent of whatever calls.csv itself suggests for that row.
-pub async fn run_trade(root_url: &str, ix: usize, amount: f64, min_floor: f64, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let wallet_address = wallet_address_from_env("WALLET_ADDRESS")?;
-    let registry = load_token_registry()?;
-
-    let calls: Vec<Call> = fetch_calls(root_url)
-        .await
-        .map_err(|e| format!("Could not fetch calls.csv from {root_url}: {e}"))?;
-
-    let call = calls.iter().find(|c| c.ix == ix)
-        .ok_or_else(|| format!("No row with ix {ix} found in calls.csv at {root_url}"))?;
-
-    let from_symbol = call.pivot_token.as_str();
-    let to_symbol = call.proposed_token.as_str();
-
-    if token_entry(&registry, from_symbol).is_err() || token_entry(&registry, to_symbol).is_err() {
-        return Err(format!("Row {ix}: '{from_symbol}' or '{to_symbol}' not in tokens.toml — refusing to trade. No funds moved."));
+/// proposed_token) exactly one row from calls.csv; amount/min_floor are 
+/// yours to set, independent of whatever calls.csv itself suggests for that row
+async fn run_trade(root_url: &str, addy: &str, ix: usize, amount: f64,
+                  
+                   dry_run: bool, debug: bool) -> ErrStr<()> {
+    debug!("run_trade", debug);
+    if amount <= 0.0 {
+       Err(format!("Cannot trade amount {amount}"))
+    } else {
+       run_trade_continuation(root_url, addy, ix, amount, min_floor,
+                              slippage_bps, dry_run, debug).await
     }
+}
 
-    println!("Row {ix}: {from_symbol} -> {to_symbol} (direction fixed by the row)");
-    run_trade_for_symbols(&wallet_address, &registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, dry_run, debug).await
+async fn run_trade_continuation(root_url: &str, addy: &str, ix: usize,
+                                amount: f64, min_floor: f64, slippage_bps: u16, 
+                                dry_run: bool, debug: bool) -> ErrStr<()> {
+    let registry = fetch_tokens(&AVALANCHE).await?;
+    let calls: Vec<Call> = fetch_calls(root_url).await?;
+    let call = calls.iter().find(|c| c.ix == ix)
+       .ok_or(format!("No row with ix {ix} found in calls.csv at {root_url}"))?;
+
+    let from = &call.pivot_token;
+    let to = &call.proposed_token;
+
+    log!("Row {}: {} -> {} (direction fixed by the row)", ix, from, to);
+    run_trade_for_symbols(addy, &registry, from, to, amount, min_floor,
+                          slippage_bps, dry_run, debug).await
 }
 
 /// Reads calls.csv and either executes EVERY row or none of them — true
@@ -538,71 +542,68 @@ pub async fn run_trade(root_url: &str, ix: usize, amount: f64, min_floor: f64, s
 /// floor right before it fires (via run_trade_for_symbols), so nothing
 /// executes below its floor regardless, but "all N execute" isn't a
 /// blockchain-level guarantee, just as close as sequential real swaps get.
-pub async fn run_calls_batch(root_url: &str, slippage_bps: u16, dry_run: bool, debug: bool) -> ErrStr<()> {
-    let wallet_address = wallet_address_from_env("WALLET_ADDRESS")?;
-    let registry = load_token_registry()?;
+async fn run_calls_batch(root_url: &str, addy: &str, slippage_bps: u16,
+                         dry_run: bool, debug: bool) -> ErrStr<()> {
+    debug!("run_calls_batch", debug);
+    let registry = fetch_tokens(&AVALANCHE).await?;
 
-    let calls: Vec<Call> = fetch_calls(root_url)
-        .await
-        .map_err(|e| format!("Could not fetch calls.csv from {root_url}: {e}"))?;
-    println!("Fetched {} call(s) from {root_url}", calls.len());
+    let calls: Vec<Call> = fetch_calls(root_url).await?;
+    log!("Fetched {} from {}", plural(calls.len(), "call"), root_url);
 
     let mut validated = Vec::with_capacity(calls.len());
     for call in &calls {
-        let from_symbol = call.pivot_token.as_str();
-        let to_symbol = call.proposed_token.as_str();
+        let from = &call.pivot_token;
+        let to = &call.proposed_token;
         let amount = call.pivot_amount as f64;
         let min_floor = call.gain_10_percent as f64;
 
-        if token_entry(&registry, from_symbol).is_err() || token_entry(&registry, to_symbol).is_err() {
-            return Err(format!(
-                "Call #{}: '{from_symbol}' or '{to_symbol}' not in tokens.toml. This is a \
-                 go/no-go batch — one row failing means none execute. No funds moved.",
-                call.ix
-            ));
-        }
-
-        let available = wallet_balance(&wallet_address, from_symbol, &registry).await?;
+        let available = wallet_balance(&wallet_address, from, &registry).await?;
         if available + 1e-6 < amount {
-            return Err(format!(
-                "Call #{}: insufficient {from_symbol} — need {amount:.6}, only {available:.6} \
-                 available. This is a go/no-go batch — one row failing means none execute. No funds moved.",
-                call.ix
-            ));
+            return Err(format!("
+Call #{}: insufficient {from} — need {amount:.6}, only {available:.6}
+available. This is a go/no-go batch — one row failing means none execute.
+No funds moved.", call.ix));
         }
 
-        let swap = query_swap("avalanche", &registry, from_symbol, to_symbol, amount, debug).await?;
-        println!("  Call #{}: {amount:.6} {from_symbol} -> {:.8} {to_symbol} swapped (10%-gain floor {min_floor:.8})", call.ix, swap.amount_out);
+        let swap =
+           query_swap(&AVALANCHE, &registry, from, to, amount, debug).await?;
+        let log_line0 =
+           format!("{}: {amount:.6} {from} -> {:.8} {to} swapped",
+                   swap.amount_out);
+        let log_line =
+           format!("{log_line0} (10%-gain floor {min_floor:.8})");
+        log!("Call #{}: {}", call.ix, log_line);
         if swap.amount_out < min_floor {
-            return Err(format!(
-                "Call #{}: swap ({:.8} {to_symbol}) is below its 10%-gain floor ({min_floor:.8} \
-                 {to_symbol}). This is a go/no-go batch — one row failing means none execute. No funds moved.",
-                call.ix, swap.amount_out
-            ));
+            return Err(format!("
+Call #{}: swap ({:.8} {to}) is below its 10%-gain floor ({min_floor:.8}
+{to}). This is a go/no-go batch — one row failing means none execute. 
+No funds moved.", call.ix, swap.amount_out));
         }
-
-        validated.push((call, from_symbol, to_symbol, amount, min_floor));
+        validated.push((call, from, to, amount, min_floor));
     }
 
+    log!("All {} cleared their 10%-gain floor",
+         plural(validated.len(), "call"));
     if dry_run {
-        println!("All {} call(s) cleared their 10%-gain floor. [DRY RUN] would execute all of them now.", validated.len());
-        return Ok(());
-    }
-
-    println!("All {} call(s) cleared their 10%-gain floor. Executing.", validated.len());
-    for (call, from_symbol, to_symbol, amount, min_floor) in validated {
-        println!("--- Call #{} ({from_symbol} -> {to_symbol}) ---", call.ix);
-        run_trade_for_symbols(&wallet_address, &registry, from_symbol, to_symbol, amount, min_floor, slippage_bps, false, debug).await?;
+        log!("[DRY RUN] would execute all of them now.");
+    } else { 
+       for (call, from, to, amount, min_floor) in validated {
+          let trade = format!("{from} -> {to}");
+          log!("--- Call #{} ({}) ---", call.ix, trade);
+       run_trade_for_symbols(&addy, &registry, from, to, amount, min_floor,
+                             slippage_bps, false, debug).await?;
+       }
     }
     Ok(())
 }
 
 //============================================================================
-//----- CLI ---------------------------------------------------------------------
+//----- CLI ----------------------------------------------------------------
 //============================================================================
+
+/// Close exactly one row from calls.csv by its 'ix'. Direction fixed by the row
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Close exactly one row from calls.csv by its 'ix'. Direction fixed by the row
     Trade {
         ix: usize,
         amount: f64,
@@ -642,7 +643,8 @@ struct Args {
     /// Applies across every subcommand and the default survey — checks
     /// only, never touches the keystore or sends a tx. `global = true`
     /// means it can go either before or after the subcommand, e.g. both
-    /// `arbitrage --dry-run new PAXG 2.0` and `arbitrage new PAXG 2.0 --dry-run` work.
+    /// `arbitrage --dry-run new PAXG 2.0` and 
+    /// `arbitrage new PAXG 2.0 --dry-run` work.
     #[arg(long, global = true, default_value_t = false)]
     dry_run: bool,
 
@@ -677,20 +679,13 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 mod unit_tests {
     use super::*;
 
-    #[test]
-    fn test_load_token_registry_has_expected_tokens() -> ErrStr<()> {
-        let registry = load_token_registry()?;
-        for symbol in ["AVAX", "BTC", "ETH", "USDC", "UNDEAD"] {
-            assert!(registry.contains_key(symbol), "missing '{symbol}' in tokens.toml");
-        }
-        Ok(())
-    }
-
     #[tokio::test]
-    async fn test_run_trade_for_symbols_rejects_zero_or_negative_amounts() -> ErrStr<()> {
-        let registry = load_token_registry()?;
+    async fn test_run_trade_for_symbols_rejects_zero_or_negative_amounts()
+            -> ErrStr<()> {
+        let registry = fetch_tokens(&AVALANCHE).await?;
         let dummy_wallet = "0x0000000000000000000000000000000000dEaD";
-        assert!(run_trade_for_symbols(dummy_wallet, &registry, "BTC", "ETH", 0.0, 1.0, 50, true, false).await.is_err());
+        assert!(run_trade_for_symbols(dummy_wallet, &registry, "BTC", "ETH",
+                                      0.0, 1.0, 50, true, false).await.is_err());
         assert!(run_trade_for_symbols(dummy_wallet, &registry, "BTC", "ETH", 1.0, 0.0, 50, true, false).await.is_err());
         assert!(run_trade_for_symbols(dummy_wallet, &registry, "BTC", "ETH", -1.0, 1.0, 50, true, false).await.is_err());
         Ok(())
@@ -708,8 +703,9 @@ mod unit_tests {
     // trading::auto_trading's own unit tests — nothing arbitrage-specific
     // left to cover here.
 }
+
 //============================================================================
-//----- FUNCTIONAL TESTS -------------------------------------------------------
+//----- FUNCTIONAL TESTS -----------------------------------------------------
 //============================================================================
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
@@ -722,16 +718,10 @@ pub mod functional_tests {
     const PIVOT_ROOT_URL: &str = "https://raw.githubusercontent.com/pivoteur/pivoteur.github.io";
     const TEST_WALLET: &str = "0xd16E431b1363Ed90C4fD4906Cf7Fc33E51115429";
 
-    create_testing!("quiz12::arbitrage");
-
-    run!("wallet_balance", " (real ETH read against dedicated test wallet, read-only)", {
-        let registry = load_token_registry()?;
-        let balance = now(wallet_balance(TEST_WALLET, "ETH", &registry))?;
-        println!("\ttest wallet ETH balance: {balance:.4}");
-    });
+    create_testing!("quiz01::b_arbitrage");
 
     run!("trade_by_row_dry_run", " (real calls.csv fetch, real row, read-only per-row check)", {
-        let registry = load_token_registry()?;
+        let registry = load_tokens(&AVALANCHE)?;
         let calls = now(fetch_calls(PIVOT_ROOT_URL))?;
         if let Some(call) = calls.first() {
             let available = now(wallet_balance(TEST_WALLET, call.pivot_token.as_str(), &registry))?;
