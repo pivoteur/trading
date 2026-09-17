@@ -1,5 +1,5 @@
-name: 'sendan-bot'
-description: "Sends tokens from the pivot-bot wallet."
+name: 'sendan-wash'
+description: "Sends tokens from the wash wallet."
 
 on:
   workflow_dispatch:
@@ -96,7 +96,7 @@ jobs:
 
       - name: Write keystore file from secret
         env:
-          KEYSTORE_JSON: ${{ secrets.BOT_KEYSTORE_JSON }}
+          KEYSTORE_JSON: ${{ secrets.WASH_KEYSTORE_JSON }}
         run: |
           echo "$KEYSTORE_JSON" > "$RUNNER_TEMP/keystore.json"
           echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.json" >> $GITHUB_ENV
@@ -116,8 +116,8 @@ jobs:
 
       - name: Run dapp
         env:
-          WALLET_ADDRESS:      ${{ secrets.BOT_ADDRESS }}
-          KEYSTORE_PASSWORD:   ${{ secrets.BOT_KEYSTORE_PASSWORD }}
+          WALLET_ADDRESS:      ${{ secrets.WASH_ADDRESS }}
+          KEYSTORE_PASSWORD:   ${{ secrets.WASH_KEYSTORE_PASSWORD }}
         run: |
           ARGS=""
           if [ "${{ inputs.debug }}" = "true" ]; then
@@ -131,7 +131,7 @@ jobs:
           ARGS="$ARGS --keystore-path $KEYSTORE_PATH"
           ARGS="$ARGS ${{ inputs.token }} ${{ inputs.amount }}"
           ARGS="$ARGS ${{ inputs.destination }}"
-          echo "=== Running $DAPP on bot wallet with args $ARGS ==="
+          echo "=== Running $DAPP on wash wallet with args $ARGS ==="
           $DAPP $ARGS
 
       - name: Delete keystore file
