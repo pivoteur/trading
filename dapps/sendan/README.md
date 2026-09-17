@@ -70,6 +70,7 @@ logged at all, dry-run or not -- there was never a real send to record.
 
 ## Revisions
 
+* 1.1.1, 2026-09-17: permit comma-floats for amount to send
 * 1.1.0, 2026-09-15: library-refactoring
 * 0.1.0, 2026-08-19: initial version -- one-shot ERC-20 transfer to any
   address, address-shape validation, balance pre-check, append-only send

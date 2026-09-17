@@ -2,9 +2,10 @@ use clap::Parser;
 use book::{
    debug,
    parse_args_add_banner,
-   err_utils::ErrStr,
-   string_utils::UppercaseString,
    cli_utils::generate_banner,
+   err_utils::ErrStr,
+   num::floats::comma_floats::CommaFloat,
+   string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
@@ -26,13 +27,13 @@ const DUST_EPSILON: f64 = 1e-8;
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.1.0")]
+#[command(name = "sendan", version = "1.1.1")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
     token: UppercaseString,
 
     /// Amount of `token` to send. e.g. `1100`
-    amount: f64,
+    amount: CommaFloat,
 
     /// Destination address: `0x` followed by 40 hex characters. e.g. `0x1234567890abcdef1234567890abcdef12345678`
     to_address: String,
@@ -64,14 +65,14 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
-    let amount = args.amount;
+    let amount: f32 = args.amount.into();
     let to = &args.to_address;
     if !is_valid_evm_address(to) {
         return Err(format!(
             "'{to}' doesn't look like an EVM address
 expected '0x' followed by 40 hex characters."));
     }
-    runoff_continuation(&args.blockchain, amount, &args.token, to,
+    runoff_continuation(&args.blockchain, amount as f64, &args.token, to,
                         &args.wallet_address, &args.keystore_path,
                         args.dry_run, args.debug).await
 }
