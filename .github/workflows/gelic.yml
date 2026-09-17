@@ -1,0 +1,109 @@
+name: gelic
+description: "Fetches the balances of an address on a specified blockchain"
+
+on:
+  workflow_dispatch:
+    inputs:
+      blockchain:
+        description: "The blockchain from which to read the address' balances"
+        type: choice
+        options:
+          - Avalanche
+          - Binance
+        default: Avalanche
+      wallet:
+        description: "Wallet address"
+        type: string
+        required: true
+      debug:
+        description: "Show in-process work"
+        type: boolean
+        default: false
+
+env:
+  DAPP: gelic
+
+jobs:
+  run-gelic:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout trading
+        uses: actions/checkout@v4
+        with:
+          path: trading
+
+      - name: Load Shared Environment Variables
+        uses: doughepi/yaml-env-action@v1.0.0
+        with:
+          files: trading/.github/config/trading-env.yml
+
+      - name: Establish app path
+        run: echo "DAPP_DIR=$DAPPS_DIR/$DAPP" >> $GITHUB_ENV
+
+      - name: Establish git path
+        run: echo "GIT_DAPP_DIR=$GITHUB_PATH/$DAPP_DIR" >> $GITHUB_ENV
+
+      - name: Cache binary
+        id: binary-cache
+        uses: actions/cache@v4
+        with:
+          path: trading/dapps/gelic/target/release/gelic
+          key: >-
+            gelic-binary-
+            ${{ hashFiles(format('{0}/quiz02/a_gelic/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
+            ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
+            ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
+
+      - name: Install Rust toolchain
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout protocol
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: pivoteur/protocol
+          path: protocol
+          ref: main
+
+      - name: Checkout crypto-n-rust
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: logicalgraphs/crypto-n-rust
+          path: crypto-n-rust
+
+      - name: Build dapp
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --manifest-path $DAPP_DIR/Cargo.toml --release
+
+      - name: Add dapp to PATH
+        run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
+
+      - name: salutation
+        run: $DAPP --help
+
+      - name: Show input parameters
+        run: |
+          echo "=== Running $DAPP with manual inputs ==="
+          echo "blockchain: ${{ inputs.blockchain }}"
+          echo "wallet:     ${{ inputs.wallet }}"
+          echo "debug:      ${{ inputs.debug }}"
+
+      - name: run dapp
+        run: |
+          ARGS=""
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            ARGS="--debug"
+          fi
+          ARGS="$ARGS --blockchain ${{ inputs.blockchain }} ${{ inputs.wallet }}"
+          echo "=== Running $DAPP with args $ARGS ==="
+          $DAPP $ARGS
+
+# eventually we'll save wallet info to the protocol, but that's for later
+
