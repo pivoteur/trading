@@ -40,5 +40,6 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
+* 1.1.1, 2026-09-17: allow comma-floats as inputs to floor and amount
 * 1.1.0, 2026-09-15: library-refactoring
 * 1.0.0, 2026-08-20: released

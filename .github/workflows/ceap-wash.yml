@@ -1,5 +1,5 @@
-name: 'sendan-bot'
-description: "Sends tokens from the pivot-bot wallet."
+name: 'ceap-wash'
+description: "Trades tokens on the wash wallet."
 
 on:
   workflow_dispatch:
@@ -11,18 +11,22 @@ on:
           - Avalanche
           - Binance
         default: Avalanche
-      token:
-        description: "token to send"
+      from:
+        description: "token to trade"
         type: string
         default: "BTC"
       amount:
-        description: "amount of token to send"
+        description: "amount of token to trade"
         type: string
         required: true
-      destination:
-        description: "receiver address"
+      to:
+        description: "token received from trade"
         type: string
         required: true
+      floor:
+        description: "Minimum amount needed for trade to complete."
+        type: string
+        default: "0.0"
       debug:
         description: "Show in-process work"
         type: boolean
@@ -33,10 +37,10 @@ on:
         default: false
 
 env:
-  DAPP: sendan
+  DAPP: ceap
 
 jobs:
-  run-sendan:
+  run-ceap:
     runs-on: ubuntu-latest
 
     steps:
@@ -57,10 +61,10 @@ jobs:
         id: binary-cache
         uses: actions/cache@v4
         with:
-          path: trading/dapps/sendan/target/release/sendan
+          path: trading/dapps/ceap/target/release/ceap
           key: >-
-            sendan-binary-
-            ${{ hashFiles(format('{0}/quiz01/d_sendan/mod.rs', env.QUIZZES_SRC)) }}-
+            ceap-binary-
+            ${{ hashFiles(format('{0}/quiz02/c_ceap/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
@@ -96,7 +100,7 @@ jobs:
 
       - name: Write keystore file from secret
         env:
-          KEYSTORE_JSON: ${{ secrets.BOT_KEYSTORE_JSON }}
+          KEYSTORE_JSON: ${{ secrets.WASH_KEYSTORE_JSON }}
         run: |
           echo "$KEYSTORE_JSON" > "$RUNNER_TEMP/keystore.json"
           echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.json" >> $GITHUB_ENV
@@ -108,16 +112,17 @@ jobs:
         run: |
           echo "=== Running $DAPP with manual inputs ==="
           echo "blockchain:  ${{ inputs.blockchain }}"
-          echo "token:       ${{ inputs.token }}"
+          echo "from:        ${{ inputs.from }}"
           echo "amount:      ${{ inputs.amount }}"
-          echo "destination: ${{ inputs.destination }}"
+          echo "to:          ${{ inputs.to }}"
+          echo "floor:       ${{ inputs.floor }}"
           echo "dry-run:     ${{ inputs.dry-run }}"
           echo "debug:       ${{ inputs.debug }}"
 
       - name: Run dapp
         env:
-          WALLET_ADDRESS:      ${{ secrets.BOT_ADDRESS }}
-          KEYSTORE_PASSWORD:   ${{ secrets.BOT_KEYSTORE_PASSWORD }}
+          WALLET_ADDRESS:      ${{ secrets.WASH_ADDRESS }}
+          KEYSTORE_PASSWORD:   ${{ secrets.WASH_KEYSTORE_PASSWORD }}
         run: |
           ARGS=""
           if [ "${{ inputs.debug }}" = "true" ]; then
@@ -127,9 +132,9 @@ jobs:
             ARGS="$ARGS --dry-run"
           fi
           ARGS="$ARGS --blockchain ${{ inputs.blockchain }}"
-          ARGS="$ARGS ${{ inputs.token }} ${{ inputs.amount }}"
-          ARGS="$ARGS ${{ inputs.destination }}"
-          echo "=== Running $DAPP on bot wallet with args $ARGS ==="
+          ARGS="$ARGS --floor ${{ inputs.floor }}"
+          ARGS="$ARGS ${{ inputs.from }} ${{ inputs.amount }} ${{ inputs.to }}"
+          echo "=== Running $DAPP on wash wallet with args $ARGS ==="
           $DAPP $ARGS
 
       - name: Delete keystore file
