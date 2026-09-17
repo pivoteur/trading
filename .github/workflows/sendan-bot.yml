@@ -1,0 +1,139 @@
+name: 'sendan-bot'
+description: "Sends tokens from the pivot-bot wallet."
+
+on:
+  workflow_dispatch:
+    inputs:
+      blockchain:
+        description: "The blockchain where the tokens to send are located"
+        type: choice
+        options:
+          - Avalanche
+          - Binance
+        default: Avalanche
+      token:
+        description: "token to send"
+        type: string
+        default: "BTC"
+      amount:
+        description: "amount of token to send"
+        type: string
+        required: true
+      destination:
+        description: "receiver address"
+        type: string
+        required: true
+      debug:
+        description: "Show in-process work"
+        type: boolean
+        default: false
+      dry-run:
+        description: "simulate the send (send no tokens)"
+        type: boolean
+        default: false
+
+env:
+  DAPP: sendan
+
+jobs:
+  run-sendan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout trading
+        uses: actions/checkout@v4
+        with:
+          path: trading
+
+      - name: Load Shared Environment Variables
+        uses: doughepi/yaml-env-action@v1.0.0
+        with:
+          files: trading/.github/config/trading-env.yml
+
+      - name: Establish app path
+        run: echo "DAPP_DIR=$DAPPS_DIR/$DAPP" >> $GITHUB_ENV
+
+      - name: Cache binary
+        id: binary-cache
+        uses: actions/cache@v4
+        with:
+          path: trading/dapps/sendan/target/release/sendan
+          key: >-
+            sendan-binary-
+            ${{ hashFiles(format('{0}/quiz01/d_sendan/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
+            ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
+            ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
+
+      - name: Install Rust toolchain
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout protocol
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: pivoteur/protocol
+          path: protocol
+          ref: main
+
+      - name: Checkout crypto-n-rust
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: logicalgraphs/crypto-n-rust
+          path: crypto-n-rust
+
+      - name: Build dapp
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --manifest-path $DAPP_DIR/Cargo.toml --release
+
+      - name: Add dapp to PATH
+        run: echo "$DAPP_DIR/$EXE_SUBDIR" >> $GITHUB_PATH
+
+      - name: Write keystore file from secret
+        env:
+          KEYSTORE_JSON: ${{ secrets.BOT_KEYSTORE_JSON }}
+        run: |
+          echo "$KEYSTORE_JSON" > "$RUNNER_TEMP/keystore.json"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.json" >> $GITHUB_ENV
+
+      - name: salutation
+        run: $DAPP --help
+
+      - name: Show input parameters
+        run: |
+          echo "=== Running $DAPP with manual inputs ==="
+          echo "blockchain:  ${{ inputs.blockchain }}"
+          echo "token:       ${{ inputs.token }}"
+          echo "amount:      ${{ inputs.amount }}"
+          echo "destination: ${{ inputs.destination }}"
+          echo "dry-run:     ${{ inputs.dry-run }}"
+          echo "debug:       ${{ inputs.debug }}"
+
+      - name: Run dapp
+        env:
+          WALLET_ADDRESS:      ${{ secrets.BOT_ADDRESS }}
+          KEYSTORE_PASSWORD:   ${{ secrets.BOT_KEYSTORE_PASSWORD }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            ARGS="--debug"
+          fi
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          ARGS="$ARGS --blockchain ${{ inputs.blockchain }}"
+          ARGS="$ARGS --wallet-address $WALLET_ADDRESS"
+          ARGS="$ARGS --keystore-path $KEYSTORE_PATH"
+          ARGS="$ARGS ${{ inputs.token }} ${{ inputs.amount }}
+          ARGS="$ARGS ${{ inputs.destination }}"
+          echo "=== Running $DAPP with args $ARGS ==="
+          $DAPP $ARGS
+
+      - name: Delete keystore file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/keystore.json"
