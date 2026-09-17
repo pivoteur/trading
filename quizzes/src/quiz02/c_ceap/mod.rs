@@ -6,6 +6,7 @@ use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
+   num::floats::comma_floats::CommaFloat,
    string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
@@ -16,20 +17,20 @@ use clap::Parser;
 //===============================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.1.0")]
+#[command(version = "1.1.1")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
 
     /// amount of `from_token` to trade
-    amount: f64,
+    amount: CommaFloat,
 
     /// trading to this token
     to_token: UppercaseString,
 
     /// Minimum acceptable output amount.
-    #[arg(long, default_value_t = 0.0)]
-    floor: f64,
+    #[arg(long, default_value_t = CommaFloat(0.0))]
+    floor: CommaFloat,
 
     /// wallet address on which trade occurs
     #[arg(long, env="WALLET_ADDRESS")]
@@ -54,10 +55,12 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
+    let amount: f32 = args.amount.into();
+    let floor: f32 = args.floor.into();
     runoff_continuation(&args.blockchain, &args.wallet_address,
                         &args.keystore_path,
-                        &args.from_token, &args.to_token, args.amount,
-                        args.floor, args.dry_run, args.debug).await
+                        &args.from_token, &args.to_token, amount as f64,
+                        floor as f64, args.dry_run, args.debug).await
 }
 
 async fn runoff_continuation(blockchain: &Blockchain, addy: &str,

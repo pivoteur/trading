@@ -127,8 +127,6 @@ jobs:
             ARGS="$ARGS --dry-run"
           fi
           ARGS="$ARGS --blockchain ${{ inputs.blockchain }}"
-          ARGS="$ARGS --wallet-address $WALLET_ADDRESS"
-          ARGS="$ARGS --keystore-path $KEYSTORE_PATH"
           ARGS="$ARGS ${{ inputs.token }} ${{ inputs.amount }}"
           ARGS="$ARGS ${{ inputs.destination }}"
           echo "=== Running $DAPP on BTC+UNDEAD wallet with args $ARGS ==="
