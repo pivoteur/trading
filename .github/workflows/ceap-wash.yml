@@ -138,7 +138,7 @@ jobs:
           fi
           ARGS="$ARGS --blockchain ${{ inputs.blockchain }}"
           ARGS="$ARGS --floor ${{ inputs.floor }}"
-          ARGS="$ARGS --slippage_bps ${{ inputs.slippage_bps }}"
+          ARGS="$ARGS --slippage-bps ${{ inputs.slippage_bps }}"
           ARGS="$ARGS ${{ inputs.from }} ${{ inputs.amount }} ${{ inputs.to }}"
           echo "=== Running $DAPP on wash wallet with args $ARGS ==="
           $DAPP $ARGS
