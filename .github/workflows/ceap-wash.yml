@@ -32,7 +32,7 @@ on:
         type: boolean
         default: false
       dry-run:
-        description: "simulate the send (send no tokens)"
+        description: "simulate the trade (trade no tokens)"
         type: boolean
         default: false
 
