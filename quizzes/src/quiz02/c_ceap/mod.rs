@@ -32,6 +32,10 @@ struct Args {
     #[arg(long, default_value_t = CommaFloat(0.0))]
     floor: CommaFloat,
 
+    /// Slippage percent (where 1000 BPS is 10% higher than floor)
+    #[arg(long, default_value_t = 0)]
+    slippage_bps: u16,
+
     /// wallet address on which trade occurs
     #[arg(long, env="WALLET_ADDRESS")]
     wallet_address: String,
@@ -60,17 +64,18 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     runoff_continuation(&args.blockchain, &args.wallet_address,
                         &args.keystore_path,
                         &args.from_token, &args.to_token, amount as f64,
-                        floor as f64, args.dry_run, args.debug).await
+                        floor as f64, args.slippage_bps,
+                        args.dry_run, args.debug).await
 }
 
 async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
                              keystore_path: &str, from: &str, to: &str,
-                             amount: f64, floor: f64,
+                             amount: f64, floor: f64, slippage: u16,
                              dry_run: bool, debug: bool) -> ErrStr<()> {
     let registry = fetch_tokens(blockchain).await?;
     let ans =
         attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
-                                         amount, floor, 1000, keystore_path,
+                                         amount, floor, slippage, keystore_path,
                                          dry_run, debug).await?;
     println!("answer is {ans:?}");
     Ok(())
@@ -88,7 +93,7 @@ pub mod functional_test {
 
     create_testing!("quiz02::c_ceap");
 
-    run!("ceap_functionality",
+    run!("ceap",
         now(runoff_continuation(&AVALANCHE, "0x123", "xyz",
-                                "BTC", "ETH", 1.0, 0.0, true, true))?);
+                                "BTC", "ETH", 1.0, 16.0, 200, true, true))?);
 }

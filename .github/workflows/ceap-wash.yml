@@ -27,6 +27,10 @@ on:
         description: "Minimum amount needed for trade to complete."
         type: string
         default: "0.0"
+      slippage_bps:
+        description: "How much above the floor, e.g. 1000 is 10% above floor"
+        type: number
+        default: 0
       debug:
         description: "Show in-process work"
         type: boolean
@@ -111,13 +115,14 @@ jobs:
       - name: Show input parameters
         run: |
           echo "=== Running $DAPP with manual inputs ==="
-          echo "blockchain:  ${{ inputs.blockchain }}"
-          echo "from:        ${{ inputs.from }}"
-          echo "amount:      ${{ inputs.amount }}"
-          echo "to:          ${{ inputs.to }}"
-          echo "floor:       ${{ inputs.floor }}"
-          echo "dry-run:     ${{ inputs.dry-run }}"
-          echo "debug:       ${{ inputs.debug }}"
+          echo "blockchain:   ${{ inputs.blockchain }}"
+          echo "from:         ${{ inputs.from }}"
+          echo "amount:       ${{ inputs.amount }}"
+          echo "to:           ${{ inputs.to }}"
+          echo "floor:        ${{ inputs.floor }}"
+          echo "slippage_bps: ${{ inputs.slippage_bps }}"
+          echo "dry-run:      ${{ inputs.dry-run }}"
+          echo "debug:        ${{ inputs.debug }}"
 
       - name: Run dapp
         env:
@@ -133,6 +138,7 @@ jobs:
           fi
           ARGS="$ARGS --blockchain ${{ inputs.blockchain }}"
           ARGS="$ARGS --floor ${{ inputs.floor }}"
+          ARGS="$ARGS --slippage_bps ${{ inputs.slippage_bps }}"
           ARGS="$ARGS ${{ inputs.from }} ${{ inputs.amount }} ${{ inputs.to }}"
           echo "=== Running $DAPP on wash wallet with args $ARGS ==="
           $DAPP $ARGS

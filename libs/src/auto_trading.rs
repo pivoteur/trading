@@ -720,11 +720,18 @@ mod functional_tests {
 
    run!("btc_quote", now(quote_for("btc"))?);
    run!("undead_quote", now(quote_for("undead"))?);
+
+   run!("slippage", " (0.78 ETH at 200 BPS)", {
+       let floor = 0.78;
+       let adjusted = slippage_adjusted_floor(floor, 200);
+       println!("adjusted floor at 200 BPS for 0.78 ETH is {adjusted:.4}");
+   });
+
 }
 
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
-mod unit_tests {
+mod tests {
     use super::*;
     use crate::{
        fetchers::tokens::fetch_tokens,
@@ -927,7 +934,8 @@ raw number, no currency conversion");
     #[test]
     fn test_classify_misfire_quote_moved_below_floor() {
         let (why, _how) = classify_misfire("Quote moved below your floor while unlocking the keystore (0.00490000 BTC quoted, but only 0.00485000 BTC is guaranteed at 50 bps slippage tolerance -- need > 0.00500000 BTC). That's not happening. No funds used.");
-        assert!(why.contains("price moved"), "expected floor-slippage classification, got: '{why}'");
+        assert!(why.contains("price moved"),
+                "expected floor-slippage classification, got: '{why}'");
     }
 
     #[test]
