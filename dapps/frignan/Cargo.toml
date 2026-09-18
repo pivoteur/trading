@@ -5,7 +5,7 @@ edition = "2024"
 
 [[bin]]
 name = "frignan"
-path = "../../quizzes/src/quiz02/b_frignan/src/main.rs"
+path = "../../quizzes/src/quiz01/a_frignan/src/main.rs"
 
 [dependencies]
 book = { path = "../../../crypto-n-rust/src/libs/book" }

@@ -17,7 +17,7 @@ use clap::Parser;
 //===============================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.1.2")]
+#[command(version = "1.1.3")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,

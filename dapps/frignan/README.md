@@ -30,6 +30,7 @@ answer is Ok(DryRunWouldClear { quoted_amount_out: 64209.07... })
 
 ## Revisions
 
+* 1.2.1, 2026-09-18: directory-restructuring
 * 1.2.0, 2026-09-15: library-refactoring
 * 1.1.5, 2026-08-28: CLAP provides default blockchain
 * 1.1.4, 2026-08-28: Calling query swap, no longer need wallet address nor 

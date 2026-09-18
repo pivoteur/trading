@@ -27,7 +27,7 @@ fn has_balance(balance: f64) -> bool {
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.1.0")]
+#[command(version = "1.1.1")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -61,8 +61,8 @@ fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
 
 //----- Wallet Read ---------------------------------------------
 
-async fn read_wallet(addy: &str, blockchain: &Blockchain,
-                         debug: bool) -> ErrStr<Vec<TokenBalance>> {
+async fn read_wallet(addy: &str, blockchain: &Blockchain, debug: bool)
+       -> ErrStr<Vec<TokenBalance>> {
     debug!("read_wallet", debug);
     let registry = fetch_tokens(&blockchain).await?;
 

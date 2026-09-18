@@ -51,7 +51,7 @@ jobs:
           path: trading/dapps/gelic/target/release/gelic
           key: >-
             gelic-binary-
-            ${{ hashFiles(format('{0}/quiz02/a_gelic/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles(format('{0}/quiz01/b_gelic/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}

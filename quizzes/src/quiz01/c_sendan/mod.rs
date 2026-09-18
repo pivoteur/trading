@@ -27,7 +27,7 @@ const DUST_EPSILON: f64 = 1e-8;
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.1.1")]
+#[command(name = "sendan", version = "1.1.2")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
     token: UppercaseString,
