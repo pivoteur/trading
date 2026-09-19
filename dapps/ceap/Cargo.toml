@@ -5,7 +5,7 @@ edition = "2021"
 
 [[bin]]
 name = "ceap"
-path = "../../quizzes/src/quiz02/c_ceap/src/main.rs"
+path = "../../quizzes/src/quiz01/d_ceap/src/main.rs"
 
 [dependencies]
 trading = { path = "../../libs" }

@@ -68,7 +68,7 @@ jobs:
           path: trading/dapps/ceap/target/release/ceap
           key: >-
             ceap-binary-
-            ${{ hashFiles(format('{0}/quiz02/c_ceap/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles(format('{0}/quiz01/d_ceap/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}

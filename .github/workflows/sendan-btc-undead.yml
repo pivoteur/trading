@@ -60,7 +60,7 @@ jobs:
           path: trading/dapps/sendan/target/release/sendan
           key: >-
             sendan-binary-
-            ${{ hashFiles(format('{0}/quiz01/d_sendan/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles(format('{0}/quiz01/c_sendan/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}

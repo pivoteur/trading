@@ -51,7 +51,7 @@ jobs:
           path: trading/dapps/frignan/target/release/frignan
           key: >-
             frignan-binary-
-            ${{ hashFiles(format('{0}/quiz02/b_frignan/mod.rs', env.QUIZZES_SRC)) }}-
+            ${{ hashFiles(format('{0}/quiz01/a_frignan/mod.rs', env.QUIZZES_SRC)) }}-
             ${{ hashFiles('trading/libs/src/auto_trading.rs') }}-
             ${{ hashFiles(format('{0}/Cargo.toml', env.DAPP_DIR)) }}-
             ${{ hashFiles(format('{0}/Cargo.lock', env.DAPP_DIR)) }}
