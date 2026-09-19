@@ -8,7 +8,6 @@ use book::{
    csv_utils::list_csv,
    err_utils::ErrStr,
    file_utils::lines_from_file,
-   num::floats::comma_floats::CommaFloat,
    string_utils::UppercaseString
 };
 use libs::{
@@ -22,10 +21,7 @@ use libs::{
 struct Args {
 
    /// token to pivot
-   token: UppercaseString,
-
-   /// Amount to pivot
-   amount: CommaFloat,
+   primary: UppercaseString,
 
    /// Pivot-token
    pivot: UppercaseString,
@@ -45,11 +41,11 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    let args = parse_args_add_banner!(Args);
    let quotes = fetch_quotes(&args.date).await?;
    runoff_continuation(&quotes, &args.path,
-                       &args.token, args.amount.into(), &args.pivot, args.debug)
+                       &args.primary, &args.pivot, args.debug)
 }
 
 fn runoff_continuation(quotes: &Quotes, path: &str,
-                       primary: &str, _amount: f32, pivot: &str, debug: bool)
+                       primary: &str, pivot: &str, debug: bool)
       -> ErrStr<()> {
    let pool = compute_pool(quotes, primary, pivot, debug)?;
    let file = lines_from_file(path)?;
@@ -76,6 +72,6 @@ mod functional_tests {
    run!("opens", {
       let mut qts = sample_btc_eth_quotes();
       runoff_continuation(&mut qts, "data/pivots/open/raw/btc-eth.tsv", "BTC", 
-                          1.0, "ETH", true)?;
+                          "ETH", true)?;
    });
 }
