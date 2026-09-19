@@ -20,6 +20,19 @@ struct RpcResponse {
     error:  Option<Value>
 }
 
+pub async fn fetch_wallet_balance(blockchain: &Blockchain, addy: &str, 
+                                  symbol: &str, registry: &TokenRegistry)
+      -> ErrStr<f64> {
+    let entry = registry.token(symbol)?;
+    let raw = if entry.native {
+        native_coin_balance(blockchain, addy).await?
+    } else {
+        let addr = entry.address.ok_or(format!("No address for {symbol}"))?;
+        erc20_balance(blockchain, addy, &addr).await?
+    };
+    Ok(raw as f64 / 10f64.powi(entry.decimals as i32))
+}
+
 async fn rpc_call(blockchain: &Blockchain, method: &str, params: Value)
       -> ErrStr<String> {
     let body = json!({
@@ -55,19 +68,6 @@ async fn native_coin_balance(blockchain: &Blockchain, addy: &str)
     let result =
        rpc_call(blockchain, "eth_getBalance", json!([addy, "latest"])).await?;
     hex_to_u128(&result)
-}
-
-pub async fn fetch_wallet_balance(blockchain: &Blockchain, addy: &str, 
-                                  symbol: &str, registry: &TokenRegistry)
-      -> ErrStr<f64> {
-    let entry = registry.token(symbol)?;
-    let raw = if entry.native {
-        native_coin_balance(blockchain, addy).await?
-    } else {
-        let addr = entry.address.ok_or(format!("No address for {symbol}"))?;
-        erc20_balance(blockchain, addy, &addr).await?
-    };
-    Ok(raw as f64 / 10f64.powi(entry.decimals as i32))
 }
 
 // ----- TESTS -------------------------------------------------------
