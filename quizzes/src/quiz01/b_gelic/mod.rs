@@ -14,12 +14,6 @@ use trading::{
    types::balances::tokens::{ TokenBalance, mk_token_balance }
 };
 
-const DUST_EPSILON: f64 = 1e-8;
-
-fn has_balance(balance: f64) -> bool {
-    balance > DUST_EPSILON
-}
-
 //----- CLI -------------------------------------------------------
 
 #[derive(Debug, Parser)]
