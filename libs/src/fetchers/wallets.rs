@@ -20,7 +20,12 @@ struct RpcResponse {
     error:  Option<Value>
 }
 
-pub async fn fetch_wallet_balance(blockchain: &Blockchain, addy: &str, 
+/*
+pub async fn fetch_wallet_balance(blockchain: &Blockchain, addy: &str) ->
+      -> ErrStr< xxx
+*/
+
+pub async fn fetch_token_balance(blockchain: &Blockchain, addy: &str, 
                                   symbol: &str, registry: &TokenRegistry)
       -> ErrStr<f64> {
     let entry = registry.token(symbol)?;
@@ -79,7 +84,7 @@ mod functional_tests {
     use paste::paste;
     use book::{ create_testing, utils::now };
     use libs::types::blockchains::Blockchain::AVALANCHE;
-    use crate::fetchers::tokens::fetch_tokens;
+    use crate::fetchers::tokens::fetch_token_registry;
 
     create_testing!("wallets");
 
@@ -88,9 +93,9 @@ mod functional_tests {
 
     async fn fetch_balance(hdr: &str, tok: &str) -> ErrStr<()> {
        let ava = &AVALANCHE;
-       let registry = fetch_tokens(ava).await?;
+       let registry = fetch_token_registry(ava).await?;
        let balance =
-          fetch_wallet_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
+          fetch_token_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
        println!("Test wallet {tok}{hdr} balance: {balance:.8}");
        Ok(())
     }

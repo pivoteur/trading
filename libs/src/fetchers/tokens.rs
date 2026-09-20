@@ -9,7 +9,8 @@ use crate::{
 //----- Token Registry --------------------------------------------------------
 //============================================================================
 
-pub async fn fetch_tokens(blockchain: &Blockchain) -> ErrStr<TokenRegistry> {
+pub async fn fetch_token_registry(blockchain: &Blockchain)
+      -> ErrStr<TokenRegistry> {
    let url = token_url(blockchain);
    let raw = read_rest(&url).await?;
    parse_token_registry(&raw)
@@ -37,18 +38,18 @@ mod functional_tests {
    create_testing!("libs::tokens");
 
    run!("load_tokens_avalanche", {
-      let toks = now(fetch_tokens(&AVALANCHE))?;
+      let toks = now(fetch_token_registry(&AVALANCHE))?;
       print_csv(&toks);
    });
 
    run!("load_tokens_binance", {
-      let toks = now(fetch_tokens(&BINANCE))?;
+      let toks = now(fetch_token_registry(&BINANCE))?;
       print_csv(&toks);
    });
 
    async fn run_query(prim: &str, piv: &str, amt: f64)
          -> ErrStr<(f64, String)> {
-      let registry = fetch_tokens(&AVALANCHE).await?;
+      let registry = fetch_token_registry(&AVALANCHE).await?;
       let swap =
          query_swap(&AVALANCHE, &registry, prim, piv, amt, true).await?;
       Ok((swap.amount_out, swap.router_address))
@@ -71,20 +72,22 @@ mod tests {
    use super::*;
    use libs::types::blockchains::Blockchain::*;
 
-   #[tokio::test] async fn test_fetch_tokens_avax_native() -> ErrStr<()> {
-      let toks = fetch_tokens(&AVALANCHE).await?;
+   #[tokio::test] async fn test_fetch_token_registry_avax_native()
+         -> ErrStr<()> {
+      let toks = fetch_token_registry(&AVALANCHE).await?;
       assert!(toks.token("avax")?.native);
       Ok(())
    }
 
-   #[tokio::test] async fn test_fetch_tokens_binance_native() -> ErrStr<()> {
-      let toks = fetch_tokens(&BINANCE).await?;
+   #[tokio::test] async fn test_fetch_token_registry_binance_native()
+         -> ErrStr<()> {
+      let toks = fetch_token_registry(&BINANCE).await?;
       assert!(toks.token("bnb")?.native);
       Ok(())
    }
 
    #[tokio::test] async fn test_btc_has_addy() -> ErrStr<()> {
-      let toks = fetch_tokens(&AVALANCHE).await?;
+      let toks = fetch_token_registry(&AVALANCHE).await?;
       let btc_mb_addy = toks.token("btc")?.address;
       assert!(btc_mb_addy.is_some());
       btc_mb_addy.and_then(|btc_addy| {
@@ -96,7 +99,7 @@ mod tests {
 
     #[tokio::test] async fn test_fetch_token_registry_has_btc_undead_avax()
           -> ErrStr<()> {
-        let registry = fetch_tokens(&AVALANCHE).await?;
+        let registry = fetch_token_registry(&AVALANCHE).await?;
         for symbol in ["BTC", "UNDEAD", "AVAX"] {
             assert!(registry.token(symbol).is_ok(),
                     "missing '{symbol}' in avalanche.toml");

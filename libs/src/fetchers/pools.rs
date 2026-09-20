@@ -1,9 +1,9 @@
 use book::err_utils::ErrStr;
 use libs::types::blockchains::Blockchain;
-use super::wallets::fetch_wallet_balance;
+use super::wallets::fetch_token_balance;
 use crate::{
    consts::UNDEAD,
-   types::{ balances::BalanceSnapshot, tokens::TokenRegistry }
+   types::{ balances::pools::BalanceSnapshot, tokens::TokenRegistry }
 };
 
 pub async fn fetch_pool_balance(blockchain: &Blockchain, addy: &str,
@@ -12,9 +12,9 @@ pub async fn fetch_pool_balance(blockchain: &Blockchain, addy: &str,
       -> ErrStr<BalanceSnapshot> {
     // Two independent reads
     let asset_balance =
-       fetch_wallet_balance(blockchain, addy, prim, registry).await?;
+       fetch_token_balance(blockchain, addy, prim, registry).await?;
     let undead_balance =
-       fetch_wallet_balance(blockchain, addy, UNDEAD, registry).await?;
+       fetch_token_balance(blockchain, addy, UNDEAD, registry).await?;
     Ok(BalanceSnapshot {
         asset_balance,
         asset_committed: committed,

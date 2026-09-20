@@ -1,4 +1,7 @@
-use trading::{ auto_trading::query_swap, fetchers::tokens::fetch_tokens };
+use trading::{
+   auto_trading::query_swap,
+   fetchers::tokens::fetch_token_registry
+};
 use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
@@ -35,7 +38,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 
 async fn runoff_continuation(blockchain: &Blockchain, from_token: &str,
                              debug: bool) -> ErrStr<()> {
-    let registry = fetch_tokens(blockchain).await?;
+    let registry = fetch_token_registry(blockchain).await?;
     let ans =
        query_swap(blockchain, &registry, from_token, "USDC", 1.0, debug).await?;
     let quoted_amount_out = ans.amount_out;

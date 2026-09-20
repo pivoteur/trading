@@ -1,20 +1,17 @@
 use clap::Parser;
-use serde::Serialize;
-use serde_with::{ serde_as, DisplayFromStr };
 
 use book::{
     debug,
     parse_args_add_banner,
     cli_utils::generate_banner,
-    currency::usd::{ USD, mk_usd },
     csv_utils::as_csv,
-    err_utils::ErrStr,
-    string_utils::s
+    err_utils::ErrStr
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
    auto_trading::query_quote,
-   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance }
+   fetchers::{ tokens::fetch_token_registry, wallets::fetch_token_balance },
+   types::balances::tokens::{ TokenBalance, mk_token_balance }
 };
 
 const DUST_EPSILON: f64 = 1e-8;
@@ -27,7 +24,7 @@ fn has_balance(balance: f64) -> bool {
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.1.1")]
+#[command(version = "1.1.2")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -41,30 +38,12 @@ struct Args {
     debug: bool
 }
 
-// ----- TokenBalance -------------------------------------------------------
-
-#[serde_as]
-#[derive(Debug, Clone, Serialize)]
-struct TokenBalance {
-   token: String,
-   #[serde_as(as = "DisplayFromStr")]
-   quote: USD,
-   amount: f32,
-   #[serde_as(as = "DisplayFromStr")]
-   nav: USD
-}
-
-fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
-   let nav = mk_usd(quote.amount() * amount);
-   TokenBalance { token: s(tok), quote, amount, nav }
-}
-
 //----- Wallet Read ---------------------------------------------
 
 async fn read_wallet(addy: &str, blockchain: &Blockchain, debug: bool)
        -> ErrStr<Vec<TokenBalance>> {
     debug!("read_wallet", debug);
-    let registry = fetch_tokens(&blockchain).await?;
+    let registry = fetch_token_registry(&blockchain).await?;
 
     log!("wallet {} on {}", addy, blockchain);
 
@@ -73,7 +52,7 @@ async fn read_wallet(addy: &str, blockchain: &Blockchain, debug: bool)
     symbols.sort();
     let mut ans = Vec::new();
     for symbol in symbols {
-       match fetch_wallet_balance(blockchain, addy, symbol, &registry).await {
+       match fetch_token_balance(blockchain, addy, symbol, &registry).await {
           Ok(balance) if has_balance(balance) => { 
              log!("Token {}: {:.8}", symbol, balance);
              let qt = query_quote(blockchain, &registry, symbol, debug).await?;

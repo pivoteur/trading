@@ -7,7 +7,7 @@ use std::{
 use chrono::{ DateTime, Utc };
 use book::err_utils::{ ErrStr, err_or };
 use libs::types::util::Id;
-use super::types::{ balances::BalanceSnapshot, stats::CumulativeStats };
+use super::types::{ balances::pools::BalanceSnapshot, stats::CumulativeStats };
 
 const LOG_TS_FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
 

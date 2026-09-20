@@ -11,7 +11,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
    addresses::is_valid_evm_address,
    auto_trading::send_tokens_to_address,
-   fetchers::{ tokens::fetch_tokens, wallets::fetch_wallet_balance }
+   fetchers::{ tokens::fetch_token_registry, wallets::fetch_token_balance }
 };
 
 //======================================================
@@ -29,13 +29,15 @@ const DUST_EPSILON: f64 = 1e-8;
 #[derive(Debug, Parser)]
 #[command(name = "sendan", version = "1.1.2")]
 struct Args {
-    /// ERC-20 token symbol to send; must have an address entry in the <blockchain>.toml's file. e.g. `UNDEAD`
+    /// ERC-20 token symbol to send; must have an address entry in 
+    ///the <blockchain>.toml's file. e.g. `UNDEAD`
     token: UppercaseString,
 
     /// Amount of `token` to send. e.g. `1100`
     amount: CommaFloat,
 
-    /// Destination address: `0x` followed by 40 hex characters. e.g. `0x1234567890abcdef1234567890abcdef12345678`
+    /// Destination address: `0x` followed by 40 hex characters, 
+    /// e.g. `0x1234567890abcdef1234567890abcdef12345678`
     to_address: String,
 
     /// Blockchain to send on; must match a `data/<blockchain>.toml` file
@@ -89,7 +91,7 @@ async fn runoff_continuation(blockchain: &Blockchain, amount: f64, token: &str,
         return Err(format!("sendan: amount must be positive, got {amount}"));
     }
 
-    let registry = fetch_tokens(&blockchain).await?;
+    let registry = fetch_token_registry(&blockchain).await?;
 
     // fail fast on an unknown/native token before spending an RPC call on
     // a balance check we already know can't lead anywhere.
@@ -99,7 +101,7 @@ async fn runoff_continuation(blockchain: &Blockchain, amount: f64, token: &str,
     }
 
     let balance =
-       fetch_wallet_balance(blockchain, addy, token, &registry).await?;
+       fetch_token_balance(blockchain, addy, token, &registry).await?;
     log!("wallet {}", addy);
     let log_line1 = format!("{token} {balance:.8}");
     log!("Balance {}", log_line1);
@@ -171,9 +173,9 @@ mod functional_tests {
     });
 
     run!("sendan", {
-        let registry = now(fetch_tokens(&AVALANCHE))?;
+        let registry = now(fetch_token_registry(&AVALANCHE))?;
         let balance =
-           now(fetch_wallet_balance(&AVALANCHE, "0x123", "UNDEAD", &registry))?;
+           now(fetch_token_balance(&AVALANCHE, "0x123", "UNDEAD", &registry))?;
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
         if balance <= DUST_EPSILON {
             println!("\ttest wallet holds no UNDEAD -- confirming sendan correctly refuses to send rather than assuming a happy path");

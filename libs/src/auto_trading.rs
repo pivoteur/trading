@@ -1,8 +1,4 @@
-use std::{
-   collections::HashMap,
-   path::Path,
-   str::FromStr
-};
+use std::{ collections::HashMap, path::Path, str::FromStr };
 use ethers::{
    middleware::SignerMiddleware,
    providers::{Http, Middleware, Provider},
@@ -28,7 +24,7 @@ use super::{
    consts::UNDEAD,
    hex::pad_address_for_call,
    logging::parse_log_ts,
-   fetchers::wallets::fetch_wallet_balance,
+   fetchers::wallets::fetch_token_balance,
    types::{
       stats::CumulativeStats,
       tokens::{ TokenRegistry, TokenEntry }
@@ -364,13 +360,13 @@ pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
            })
         } else {
             let balance_before =
-               fetch_wallet_balance(blockchain, addy, to, registry).await?;
+               fetch_token_balance(blockchain, addy, to, registry).await?;
             let (tx_hash, gas_avax) =
                execute_trade(blockchain, addy, registry, from, to, amount,
                              min_floor, slippage_bps, keystore_path,
                              debug).await?;
             let balance_after =
-               fetch_wallet_balance(blockchain, addy, to, registry).await?;
+               fetch_token_balance(blockchain, addy, to, registry).await?;
             let actual_received = balance_after - balance_before;
                 debug_trade_result(Some(&tx_hash), "EXECUTED", from, to,
                                    amount, &swap, min_floor, debug);
@@ -705,14 +701,14 @@ mod functional_tests {
    use super::*;
    use paste::paste;
    use book::{ create_testing, utils::now };
-   use crate::fetchers::tokens::fetch_tokens;
+   use crate::fetchers::tokens::fetch_token_registry;
 
    create_testing!("auto_trading");
 
    async fn quote_for(tok: &str) -> ErrStr<()> {
       let token = tok.to_uppercase();
       let ava = &Blockchain::AVALANCHE;
-      let reg = fetch_tokens(ava).await?;
+      let reg = fetch_token_registry(ava).await?;
       let quote = query_quote(ava, &reg, &token, true).await?;
       println!("{token} quote: {quote}");
       Ok(())
@@ -734,15 +730,15 @@ mod functional_tests {
 mod tests {
     use super::*;
     use crate::{
-       fetchers::tokens::fetch_tokens,
+       fetchers::tokens::fetch_token_registry,
        logging::{ log_misfire, log_row },
-       types::balances::BalanceSnapshot
+       types::balances::pools::BalanceSnapshot
     };
     use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
-      let tokens = fetch_tokens(blockchain).await?;
+      let tokens = fetch_token_registry(blockchain).await?;
       let query =
          query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await;
       assert!(query.is_ok());
@@ -751,7 +747,7 @@ mod tests {
 
    #[tokio::test] async fn test_query_swap_btc_eth_ratio() -> ErrStr<()> {
       let blockchain = &AVALANCHE;
-      let tokens = fetch_tokens(blockchain).await?;
+      let tokens = fetch_token_registry(blockchain).await?;
       let query =
          query_swap(blockchain, &tokens, "BTC", "ETH", 1.0, true).await?;
       let ratio = query.amount_out;
