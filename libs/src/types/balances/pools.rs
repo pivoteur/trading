@@ -1,17 +1,20 @@
+use book::string_utils::s;
+
 #[derive(Debug, Clone)]
 pub struct BalanceSnapshot {
+    asset:            String,
     asset_balance:    f32,
     asset_committed:  f32,
     undead_balance:   f32,
     undead_committed: f32
 }
 
-pub fn mk_balance_snapshot(assbal: Option<f32>, asset_committed: f32,
+pub fn mk_balance_snapshot(ass: &str, assbal: Option<f32>, asset_committed: f32,
                            undbal: Option<f32>, undead_committed: f32)
       -> BalanceSnapshot {
    let asset_balance = assbal.unwrap_or(0.0);
    let undead_balance = undbal.unwrap_or(0.0);
-   BalanceSnapshot { asset_balance, asset_committed,
+   BalanceSnapshot { asset: s(ass), asset_balance, asset_committed,
                      undead_balance, undead_committed }
 }
 
@@ -24,7 +27,7 @@ impl BalanceSnapshot {
    pub fn status(&self) -> String {
       format!("
 {}
-{}", asset_status("BTC", self.asset_balance, self.asset_committed),
+{}", asset_status(&self.asset, self.asset_balance, self.asset_committed),
      asset_status("UNDEAD", self.undead_balance, self.undead_committed))
    }
 }
