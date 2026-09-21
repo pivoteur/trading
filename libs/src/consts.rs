@@ -2,5 +2,10 @@
 //----- Shared Trading Constants -----------------------------------------------
 //============================================================================
 
+pub const DUST_EPSILON: f32 = 1e-8;
 pub const UNDEAD: &'static str = "UNDEAD";
-pub const NO_REAL_FLOOR: f64 = 0.000_000_01;
+
+pub mod test_wallets {
+   pub const TEST_ADDRESS: &'static str =
+      "0x70D0dF26F6A61fC33ef28EB490b9A645bCb3753A";
+}

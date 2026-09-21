@@ -1,6 +1,6 @@
 use trading::{
    auto_trading::attempt_trade_with_actual_amount,
-   fetchers::tokens::fetch_tokens
+   fetchers::tokens::fetch_token_registry
 };
 use book::{
    parse_args_add_banner,
@@ -17,7 +17,7 @@ use clap::Parser;
 //===============================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.1.3")]
+#[command(version = "1.1.4")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -63,16 +63,16 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let floor: f32 = args.floor.into();
     runoff_continuation(&args.blockchain, &args.wallet_address,
                         &args.keystore_path,
-                        &args.from_token, &args.to_token, amount as f64,
-                        floor as f64, args.slippage_bps,
+                        &args.from_token, &args.to_token, amount,
+                        floor, args.slippage_bps,
                         args.dry_run, args.debug).await
 }
 
 async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
                              keystore_path: &str, from: &str, to: &str,
-                             amount: f64, floor: f64, slippage: u16,
+                             amount: f32, floor: f32, slippage: u16,
                              dry_run: bool, debug: bool) -> ErrStr<()> {
-    let registry = fetch_tokens(blockchain).await?;
+    let registry = fetch_token_registry(blockchain).await?;
     let ans =
         attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
                                          amount, floor, slippage, keystore_path,

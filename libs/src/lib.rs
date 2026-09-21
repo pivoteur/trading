@@ -5,6 +5,5 @@ pub mod consts;
 pub mod fetchers;
 pub mod git_resources;
 pub mod hex;
-pub mod logging;
 pub mod path_utils;
 pub mod types;

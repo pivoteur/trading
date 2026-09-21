@@ -40,6 +40,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
+* 1.1.4, 2026-09-20: reduced trade amounts to f32-size
 * 1.1.3, 2026-09-18: directory-restructuring
 * 1.1.2, 2026-09-18: parameterize `slippage_bps`
 * 1.1.1, 2026-09-17: allow comma-floats as inputs to `floor` and `amount`

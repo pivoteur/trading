@@ -12,20 +12,18 @@ in that wallet — no keystore, no trading, no log.
 # every token in the wallet
 gelic 0x123abc69
 
-# just one token
-gelic 0x123abc69 --token BTC
-
 # a different chain (defaults to avalanche)
-gelic 0x123abc69 --blockchain binance --token BTC
+gelic 0x123abc69 --blockchain binance
 ```
 
-`wallet_address` is a required arg to pass-in, no env fallback — you always say which wallet
-to read.
+`wallet_address` is a required arg
 
-* [source](../../quizzes/src/quiz02/a_gelic/mod.rs) 
+* [source](../../quizzes/src/quiz01/b_gelic/mod.rs) 
 
 ## Revisions
 
+* 1.1.4, 2026-09-20: returns USDC price as $1.00 (instead of erroring out)
+* 1.1.2 and 1.1.3, 2026-09-20: using fetch_wallet_balances from trading-libs
 * 1.1.1, 2026-09-18: directory-restructuring
 * 1.1.0, 2026-09-15: library-refactoring
 * 0.1.0, 2026-09-04: The initial build of `gelic` with some simple tests. 
