@@ -2,5 +2,6 @@
 //----- Shared Trading Constants -----------------------------------------------
 //============================================================================
 
+pub const DUST_EPSILON: f32 = 1e-8;
 pub const UNDEAD: &'static str = "UNDEAD";
 pub const NO_REAL_FLOOR: f64 = 0.000_000_01;

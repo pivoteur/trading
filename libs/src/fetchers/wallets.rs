@@ -1,13 +1,25 @@
+use std::pin::Pin;
+
 use serde::Deserialize;
 use serde_json::{ json, Value };
 
-use book::{ err_utils::{ ErrStr, err_or }, utils::pred };
+use book::{
+   debug,
+   err_utils::{ ErrStr, err_or },
+   list_utils::async_filter_map,
+   utils::pred
+};
 use libs::types::blockchains::Blockchain;
 
 use crate::{
+   auto_trading::query_quote,
    clients::http_client,
+   consts::DUST_EPSILON,
    hex::{ hex_to_u128, pad_address_for_call },
-   types::tokens::TokenRegistry
+   types::{
+      balances::tokens::{ TokenBalance, mk_token_balance },
+      tokens::TokenRegistry
+   }
 };
 
 //============================================================================
@@ -25,37 +37,34 @@ pub async fn fetch_wallet_balances(blockchain: &Blockchain,
                                    addy: &str, debug: bool)
        -> ErrStr<Vec<TokenBalance>> {
     debug!("fetch_wallet_balances", debug);
-    let registry = fetch_token_registry(&blockchain).await?;
-
     log!("wallet {} on {}", addy, blockchain);
 
-    fn token_fetcher(b: &Blockchain, a: &str, r: &TokenRegistry, d: bool)
-         -> impl Fn(&str) -> impl Future<Output = ErrStr<Option<TokenBalance>> {
-       async move |tok: &str| {
-          let bal = fetch_token_balance(b, a, tok, r, d).await?
-          bal.async_and_then(|amt| {
-             let qt = query_quote(blockchain, &registry, symbol, debug).await?;
+    fn token_fetcher<'a>(b: &'a Blockchain, a: &'a str, r: &'a TokenRegistry,
+                         debug: bool)
+        -> impl Fn(String)
+        -> Pin<Box<dyn Future<Output = ErrStr<Option<(String, f32)>>> + 'a>> {
+       move |tok: String| Box::pin(async move {
+          let bal = fetch_token_balance(b, a, &tok, r, debug).await?;
+          Ok(bal.and_then(|b| Some((tok, b))))
+       })
     }
     let tf = token_fetcher(blockchain, addy, registry, debug);
-    let opts = async_filter_map(tf, registry.as_map().keys().collect()).await?;
-    let toks = opts.filter_map(|tok|
-    let mut symbols: Vec<&String> = map.keys().collect();
-    symbols.sort();
-    let mut ans = Vec::new();
-    for symbol in symbols {
-       match fetch_token_balance(blockchain, addy, symbol, &registry).await {
-          Ok(balance) if has_balance(balance) => {
-             let bal = mk_token_balance(symbol, qt, balance as f32);
-             ans.push(bal);
-          },
-          Ok(_) => {
-             log!("Token {} zero/dust balance -- not in the wallet, skip it",
-                  symbol);
-          },
-          Err(e) => log!("Token {}: ! could not read balance ({})", symbol, e)
-       }
+    let toks: Vec<String> =
+       registry.as_map().keys().map(String::to_string).collect();
+    let opts = async_filter_map(tf, toks).await?;
+    let pairs: Vec<(String, f32)> = opts.into_iter().flatten().collect();
+    fn build_token_balance<'a>(b: &'a Blockchain, r: &'a TokenRegistry,
+                               debug: bool)
+          -> impl Fn((String, f32))
+          -> Pin<Box<dyn Future<Output=ErrStr<TokenBalance>> + 'a>> {
+       move |(tok, bal): (String, f32)| Box::pin(async move {
+          let qt = query_quote(b, &r, &tok, debug).await?;
+          let bal = mk_token_balance(&tok, qt, bal);
+          Ok(bal)
+       })
     }
-    Ok(ans)
+    async_filter_map(build_token_balance(blockchain, registry, debug),
+                     pairs).await
 }
 
 pub async fn fetch_token_balance(blockchain: &Blockchain, addy: &str, 
@@ -69,16 +78,12 @@ pub async fn fetch_token_balance(blockchain: &Blockchain, addy: &str,
         let addr = entry.address.ok_or(format!("No address for {symbol}"))?;
         erc20_balance(blockchain, addy, &addr).await?
     };
-    let balance = raw as f32 / 10.0.powi(entry.decimals));
+    let balance = raw as f32 / 10f32.powi(entry.decimals as i32);
     log!("Token {}: {:.8}", symbol, balance);
     Ok(pred(has_balance(balance), balance))
 }
 
-const DUST_EPSILON: f64 = 1e-8;
-
-fn has_balance(balance: f32) -> bool {
-    balance > DUST_EPSILON
-}
+fn has_balance(balance: f32) -> bool { balance > DUST_EPSILON }
 
 async fn rpc_call(blockchain: &Blockchain, method: &str, params: Value)
       -> ErrStr<String> {
@@ -136,8 +141,10 @@ mod functional_tests {
     async fn fetch_balance(hdr: &str, tok: &str) -> ErrStr<()> {
        let ava = &AVALANCHE;
        let registry = fetch_token_registry(ava).await?;
-       let balance =
-          fetch_token_balance(ava, TEST_MANDI_ADDRESS, tok, &registry).await?;
+       let balance0 =
+          fetch_token_balance(ava, TEST_MANDI_ADDRESS,
+                              tok, &registry, true).await?;
+       let balance = balance0.unwrap_or(0.0);
        println!("Test wallet {tok}{hdr} balance: {balance:.8}");
        Ok(())
     }

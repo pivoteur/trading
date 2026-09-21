@@ -1,13 +1,12 @@
 use trading::{
-   auto_trading::query_swap,
+   auto_trading::query_quote,
    fetchers::tokens::fetch_token_registry
 };
 use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
-   string_utils::UppercaseString,
-   currency::usd::mk_usd
+   string_utils::UppercaseString
 };
 use clap::Parser;
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
@@ -17,7 +16,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.2.1")]
+#[command(version = "1.2.2")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -39,11 +38,9 @@ pub async fn runoff_with_args() -> ErrStr<()> {
 async fn runoff_continuation(blockchain: &Blockchain, from_token: &str,
                              debug: bool) -> ErrStr<()> {
     let registry = fetch_token_registry(blockchain).await?;
-    let ans =
-       query_swap(blockchain, &registry, from_token, "USDC", 1.0, debug).await?;
-    let quoted_amount_out = ans.amount_out;
-    let price = mk_usd(quoted_amount_out as f32);
-    println!("{from_token}'s price is {price}");
+    let quote =
+       query_quote(blockchain, &registry, from_token, debug).await?;
+    println!("{from_token}'s price is {quote}");
     Ok(())
 }
 

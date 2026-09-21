@@ -47,8 +47,8 @@ mod functional_tests {
       print_csv(&toks);
    });
 
-   async fn run_query(prim: &str, piv: &str, amt: f64)
-         -> ErrStr<(f64, String)> {
+   async fn run_query(prim: &str, piv: &str, amt: f32)
+         -> ErrStr<(f32, String)> {
       let registry = fetch_token_registry(&AVALANCHE).await?;
       let swap =
          query_swap(&AVALANCHE, &registry, prim, piv, amt, true).await?;

@@ -1,18 +1,18 @@
 # frignan
 
-Prints the live KyberSwap price for a token, on a given blockchain, quoted against USDC.
+Prints the live KyberSwap price for a token, on a given blockchain, quoted 
+against USDC.
 
 ## Usage
 
-`frignan` <FROM_TOKEN> <AMOUNT> <BLOCKCHAIN>
+> `frignan` <TOKEN> [--blockchain <BLOCKCHAIN>]
 
 where: 
 
-* `FROM_TOKEN` is the ticker symbol, e.g. `BTC`, `BNB`, `AVAX` |
-* `AMOUNT` is the amount of `FROM_TOKEN` to quote |
+* `TOKEN` is the ticker symbol, e.g. `BTC`, `BNB`, `AVAX` |
 * `BLOCKCHAIN` is the chain name, e.g. `avalanche`, `binance` |
 
-* [source](../../quizzes/src/quiz02/b_frignan/mod.rs)
+* [source](../../quizzes/src/quiz01/a_frignan/mod.rs)
 
 Flags:
 
@@ -20,16 +20,17 @@ Flags:
 
 ## Example
 
-`frignan` <BTC> <1> <avalanche>
-answer is Ok(DryRunWouldClear { quoted_amount_out: 64209.07... })
+`frignan` BTC
+answer is $64209.07
 
 ## Requirements
 
-* `WALLET_ADDRESS` and `TVA_KEYSTORE_PATH` env vars must be set.
-* A `<blockchain>.toml` token registry file (e.g. `avalanche.toml`, `binance.toml`) must exist, listing each token's address and decimals.
+* A `<blockchain>.toml` token registry file (e.g. `avalanche.toml`) must exist, 
+listing each token's address and decimals.
 
 ## Revisions
 
+* 1.2.2, 2026-09-20: use query_quote lib function
 * 1.2.1, 2026-09-18: directory-restructuring
 * 1.2.0, 2026-09-15: library-refactoring
 * 1.1.5, 2026-08-28: CLAP provides default blockchain

@@ -11,13 +11,9 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
    addresses::is_valid_evm_address,
    auto_trading::send_tokens_to_address,
+   consts::DUST_EPSILON,
    fetchers::{ tokens::fetch_token_registry, wallets::fetch_token_balance }
 };
-
-//======================================================
-// ----- const -----------------------------------------
-//======================================================
-const DUST_EPSILON: f64 = 1e-8;
 
 //======================================================
 // ----- CLI -------------------------------------------
@@ -27,7 +23,7 @@ const DUST_EPSILON: f64 = 1e-8;
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.1.2")]
+#[command(name = "sendan", version = "1.1.3")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -74,12 +70,12 @@ pub async fn runoff_with_args() -> ErrStr<()> {
             "'{to}' doesn't look like an EVM address
 expected '0x' followed by 40 hex characters."));
     }
-    runoff_continuation(&args.blockchain, amount as f64, &args.token, to,
+    runoff_continuation(&args.blockchain, amount, &args.token, to,
                         &args.wallet_address, &args.keystore_path,
                         args.dry_run, args.debug).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain, amount: f64, token: &str,
+async fn runoff_continuation(blockchain: &Blockchain, amount: f32, token: &str,
                              to: &str, addy: &str, keystore_path: &str,
                              dry_run: bool, debug: bool) -> ErrStr<()> {
     debug!("sendan_continuation", debug);
@@ -100,9 +96,10 @@ async fn runoff_continuation(blockchain: &Blockchain, amount: f64, token: &str,
       return Err(format!("'{token}' has no address in data/{blockchain}.toml"));
     }
 
-    let balance =
-       fetch_token_balance(blockchain, addy, token, &registry).await?;
     log!("wallet {}", addy);
+    let balance0 =
+       fetch_token_balance(blockchain, addy, token, &registry, debug).await?;
+    let balance = balance0.unwrap_or(0.0);
     let log_line1 = format!("{token} {balance:.8}");
     log!("Balance {}", log_line1);
 
@@ -174,8 +171,10 @@ mod functional_tests {
 
     run!("sendan", {
         let registry = now(fetch_token_registry(&AVALANCHE))?;
-        let balance =
-           now(fetch_token_balance(&AVALANCHE, "0x123", "UNDEAD", &registry))?;
+        let balance0 =
+           now(fetch_token_balance(&AVALANCHE, "0x123", "UNDEAD", 
+                                   &registry, true))?;
+        let balance = balance0.unwrap_or(0.0);
         println!("\ttest wallet UNDEAD balance: {balance:.8}");
         if balance <= DUST_EPSILON {
             println!("\ttest wallet holds no UNDEAD -- confirming sendan correctly refuses to send rather than assuming a happy path");
