@@ -54,7 +54,7 @@ pub mod functional_test {
     use paste::paste;
     use book::{ create_testing, utils::now };
 
-    create_testing!("quiz02::b_frignan");
+    create_testing!("quiz01::a_frignan");
 
     run!("frignan_btc", {
         now(runoff_continuation(&AVALANCHE, "BTC", true))?

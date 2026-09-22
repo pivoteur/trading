@@ -28,3 +28,6 @@ rpassword = "7.5.4"
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(tarpaulin_include)']
+
+[dev-dependencies]
+serial_test = "3.0"

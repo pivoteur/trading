@@ -70,6 +70,7 @@ logged at all, dry-run or not -- there was never a real send to record.
 
 ## Revisions
 
+* 1.1.4, 2026-09-21: pushed safety-checks (and their unit tests) to trading-libs
 * 1.1.3, 2026-09-20: DUST from library, amount now f32
 * 1.1.2, 2026-09-18: directory-restructuring
 * 1.1.1, 2026-09-17: permit comma-floats for amount to send

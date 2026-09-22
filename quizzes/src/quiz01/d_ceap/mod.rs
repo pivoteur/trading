@@ -1,6 +1,9 @@
+use clap::Parser;
+
 use trading::{
    auto_trading::attempt_trade_with_actual_amount,
-   fetchers::tokens::fetch_token_registry
+   fetchers::tokens::fetch_token_registry,
+   types::tokens::TokenRegistry
 };
 use book::{
    parse_args_add_banner,
@@ -10,14 +13,13 @@ use book::{
    string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
-use clap::Parser;
 
 //=================================================================
 // ----- CLI -----------------------------------------------------
 //===============================================================
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.1.4")]
+#[command(version = "1.1.5")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -61,18 +63,20 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
     let amount: f32 = args.amount.into();
     let floor: f32 = args.floor.into();
-    runoff_continuation(&args.blockchain, &args.wallet_address,
-                        &args.keystore_path,
+    let chain = &args.blockchain;
+    let registry = fetch_token_registry(chain).await?;
+    runoff_continuation(chain, &args.wallet_address,
+                        &args.keystore_path, &registry,
                         &args.from_token, &args.to_token, amount,
                         floor, args.slippage_bps,
                         args.dry_run, args.debug).await
 }
 
 async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
-                             keystore_path: &str, from: &str, to: &str,
+                             keystore_path: &str, registry: &TokenRegistry,
+                             from: &str, to: &str,
                              amount: f32, floor: f32, slippage: u16,
                              dry_run: bool, debug: bool) -> ErrStr<()> {
-    let registry = fetch_token_registry(blockchain).await?;
     let ans =
         attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
                                          amount, floor, slippage, keystore_path,
@@ -93,7 +97,10 @@ pub mod functional_test {
 
     create_testing!("quiz02::c_ceap");
 
-    run!("ceap",
-        now(runoff_continuation(&AVALANCHE, "0x123", "xyz",
-                                "BTC", "ETH", 1.0, 16.0, 200, true, true))?);
+    run!("ceap", {
+        let ava = &AVALANCHE;
+        let registry = now(fetch_token_registry(ava))?;
+        now(runoff_continuation(ava, "0x123", "xyz", &registry,
+                                "BTC", "ETH", 1.0, 16.0, 200, true, true))?;
+    });
 }
