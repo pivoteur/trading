@@ -6,3 +6,4 @@ We figure out how to open a new pivot
 an asset.
 * [b_balances](b_balances): now let's read the balances of a pivot pool on a
 wallet.
+* [c_open_pivots](c_open_pivots): Open new pivots with available assets

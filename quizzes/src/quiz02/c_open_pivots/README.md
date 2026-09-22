@@ -1,7 +1,7 @@
 # `c_open_pivots`
 
 * We know HOWTO [check open pivots](../a_opens)
-* We know HOTWO [check pivot asset balances on a wallet](../b_balances)
+* We know HOWTO [check pivot asset balances on a wallet](../b_balances)
 
 Let's now combine the above, then, with the assets available, open new pivots
 (constrainted by some maximum amount).
