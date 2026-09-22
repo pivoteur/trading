@@ -95,7 +95,7 @@ pub mod functional_test {
     use paste::paste;
     use book::{ create_testing, utils::now };
 
-    create_testing!("quiz02::c_ceap");
+    create_testing!("quiz01::d_ceap");
 
     run!("ceap", {
         let ava = &AVALANCHE;
