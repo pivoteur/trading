@@ -1,10 +1,11 @@
 [package]
-name = "b_gelic"
+name = "c_open_pivots"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 book = { path = "../../../../../crypto-n-rust/src/libs/book" }
+libs = { path = "../../../../../protocol/libs" }
 trading = { path = "../../../../libs" }
 quizzes = { path = "../../.." }
 
