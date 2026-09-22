@@ -55,19 +55,15 @@ pub mod functional_tests {
     use paste::paste;
     use book::{ create_testing, utils::now };
     use libs::types::blockchains::Blockchain::BINANCE;
+    use trading::consts::test_wallets::TEST_ADDRESS;
 
-    /// Fixed, hardcoded dummy test address -- never read from env.
-    const TEST_GLAZEL_ADDY: &'static str =
-       "0x6700bD7EAE41434f566e48738813fC585B95669a";
-    const AVA: Blockchain = AVALANCHE;
-
-    create_testing!("quiz02::b_gelic");
+    create_testing!("quiz01::b_gelic");
 
     run!("gelic_avalanche",
-        now(runoff_continuation(&AVA, TEST_GLAZEL_ADDY, true))?
+        now(runoff_continuation(&AVALANCHE, TEST_ADDRESS, true))?
     );
 
     run!("gelic_binance",
-        now(runoff_continuation(&BINANCE, TEST_GLAZEL_ADDY, true))?
+        now(runoff_continuation(&BINANCE, TEST_ADDRESS, true))?
     );
 }

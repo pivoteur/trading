@@ -1,4 +1,3 @@
-pub mod addresses;
 pub mod auto_trading;
 pub mod clients;
 pub mod consts;

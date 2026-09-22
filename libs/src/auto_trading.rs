@@ -12,23 +12,15 @@ use ethers::{
 use serde::Deserialize;
 use serde_json::{ Value, from_str, json };
 
-use book::{
-    debug,
-    currency::usd::{ USD, mk_usd },
-    err_utils::{ ErrStr, err_or }
-};
+use book::{ debug,currency::usd::{ USD,mk_usd },err_utils::{ ErrStr,err_or } };
 use libs::types::{ blockchains::Blockchain, util::Id };
 
 use super::{
    clients::http_client,
-   // consts::UNDEAD,
+   consts::DUST_EPSILON,
    hex::pad_address_for_call,
-   // logging::parse_log_ts,
    fetchers::wallets::fetch_token_balance,
-   types::{
-     // stats::CumulativeStats,
-      tokens::{ TokenRegistry, TokenEntry }
-   }
+   types::tokens::{ TokenRegistry, TokenEntry }
 };
 
 //============================================================================
@@ -598,8 +590,8 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
                                     symbol: &str, to_address: &str,
                                     amount: f32, keystore_path: &str,
                                     verbose: bool) -> ErrStr<(String, f32)> {
-    if amount <= 0.0 {
-        Err(format!("amount must be positive, got {amount}"))
+    if amount <= DUST_EPSILON {
+        Err(format!("amount must be greater than {DUST_EPSILON}, got {amount}"))
     } else {
         send_tokens(blockchain, addy, registry, symbol, to_address, amount,
                     keystore_path, verbose).await
@@ -700,7 +692,7 @@ async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
 
 
 //============================================================================
-//----- UNIT TESTS -------------------------------------------------------------
+//----- TESTS -------------------------------------------------------------
 //============================================================================
 
 #[cfg(test)]
@@ -737,7 +729,11 @@ mod functional_tests {
 #[cfg(not(tarpaulin_include))]
 mod tests {
     use super::*;
-    use crate::fetchers::tokens::fetch_token_registry;
+    use serial_test::serial;
+    use crate::{
+       consts::{ UNDEAD, test_wallets::TEST_ADDRESS },
+       fetchers::tokens::fetch_token_registry
+    };
     use libs::types::blockchains::Blockchain::AVALANCHE;
 
    #[tokio::test] async fn test_query_swap() -> ErrStr<()> {
@@ -792,211 +788,54 @@ mod tests {
 raw number, no currency conversion");
     }
 
-/*
-    #[test]
-    fn test_replay_log_missing_file_replays_as_a_fresh_empty_pool()
-          -> ErrStr<()> {
-        let (opens, next_pivot, next_close, stats) =
-           replay_log("/tmp/definitely_does_not_exist.log")?;
-        assert!(opens.is_empty());
-        assert_eq!(next_pivot, 1);
-        assert_eq!(next_close, 1);
-        assert_eq!(stats.total_opens, 0);
+    #[tokio::test] async fn fail_send_tokens_zero_amount() -> ErrStr<()> {
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let result = send_tokens_to_address(
+            &AVALANCHE, TEST_ADDRESS, &registry, UNDEAD,
+            "0x000000000000000000000000000000000000CD", 0.0, 
+            "xyz", true).await;
+        assert!(result.is_err(),
+                "a zero amount must never reach the wallet-balance check");
         Ok(())
     }
 
-    #[test]
-    fn test_replay_log_open_then_close_leaves_nothing_open_and_totals_gain() -> ErrStr<()> {
-        let path = std::env::temp_dir().join("auto_trading_test_open_close.log");
-        let path_str = path.to_str().unwrap();
-        std::fs::write(
-            &path,
-            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
- 1970-01-01 00:33:20\tCLOSE\t\t1\t1\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+   #[tokio::test]
+   #[serial]
+   async fn fail_send_tokens_bad_address() -> ErrStr<()> {
 
-        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
-        assert!(opens.is_empty(), "pivot 1 was closed, should not appear as open");
-        assert_eq!(next_pivot, 2);
-        assert_eq!(next_close, 2);
-        assert_eq!(stats.total_opens, 1);
-        assert_eq!(stats.total_closes, 1);
-        assert!((stats.total_gain_undead - 11112.13).abs() < 0.001, "gain should land in the UNDEAD bucket (prim was UNDEAD)");
-        assert_eq!(stats.total_gain_asset, 0.0);
-        assert!((stats.total_gas_avax - 0.008).abs() < 0.00001, "gas should sum across the OPEN and CLOSE");
+        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
 
-        let _ = std::fs::remove_file(&path);
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let result = send_tokens_to_address(
+           &AVALANCHE, TEST_ADDRESS, &registry, UNDEAD, "not-address",
+           1.0, "xyz", true).await;
+        assert!(result.is_err(), "Sent tokens to malformed address");
+
+        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
+
         Ok(())
-    }
+   }
 
-    #[test]
-    fn test_replay_log_open_without_close_stays_open() -> ErrStr<()> {
-        let path = std::env::temp_dir().join("auto_trading_test_open_only.log");
-        let path_str = path.to_str().unwrap();
-        std::fs::write(
-            &path,
-            "1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n\
- 1970-01-01 00:16:40\tOPEN\t2\t\t\tBTC\tUNDEAD\t0.00500000\t487122.54000000\t\t\t\t0.00300000\t0xdef\n\
- 1970-01-01 00:33:20\tCHECK\t1\tnot_closed\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
+   #[tokio::test]
+   #[serial]
+   async fn fail_send_tokens_insufficient_liquidity() -> ErrStr<()> {
 
-        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
-        assert_eq!(opens.len(), 2, "neither pivot was closed, both should still be open");
-        assert_eq!(next_pivot, 3);
-        assert_eq!(next_close, 1, "no CLOSE lines yet, so next_close_id stays at 1");
-        assert_eq!(stats.total_closes, 0, "old-format CHECK lines are tolerated but don't count as closes");
+        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
 
-        let _ = std::fs::remove_file(&path);
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let max_amt0 = fetch_token_balance(&AVALANCHE, TEST_ADDRESS, UNDEAD,
+                                   &registry, true).await?;
+        let max_amt = max_amt0.unwrap_or(0.0);
+        let overflow = max_amt + 10000.0;
+        let result = send_tokens_to_address(
+           &AVALANCHE, TEST_ADDRESS, &registry, UNDEAD,
+           "0x000000000000000000000000000000000000CD",
+           overflow, "xyz", true).await;
+        assert!(result.is_err(), "Sent too many tokens ({overflow})");
+
+        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
+        
         Ok(())
-    }
+   }
 
-    #[test]
-    fn test_replay_log_skips_a_leading_header_row() -> ErrStr<()> {
-        let path = std::env::temp_dir().join("auto_trading_test_header.log");
-        let path_str = path.to_str().unwrap();
-        std::fs::write(
-            &path,
-            "timestamp\tkind\tpivot_id\tclose_id\topened_pivot_id\tprim\tproper\tprim_amount\tproper_amount\tgain\troi\tapr\tgas_avax\ttx_hash\n\
- 1970-01-01 00:16:40\tOPEN\t1\t\t\tUNDEAD\tBTC\t500000.00000000\t0.00502601\t\t\t\t0.00500000\t0xabc\n",
-        ).map_err(|e| format!("could not write test fixture: {e}"))?;
-
-        let (opens, _, _, _) = replay_log(path_str)?;
-        assert_eq!(opens.len(), 1, "the header row should be skipped, not treated as a malformed data row");
-
-        let _ = std::fs::remove_file(&path);
-        Ok(())
-    }
-
-    #[test]
-    fn test_replay_log_rejects_malformed_line() {
-        let path = std::env::temp_dir().join("auto_trading_test_malformed.log");
-        std::fs::write(&path, "not\teven\tclose\tto\tvalid\n").unwrap();
-        let result = replay_log(path.to_str().unwrap());
-        assert!(result.is_err());
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_replay_log_rejects_close_with_no_matching_open() {
-        let path = std::env::temp_dir().join("auto_trading_test_orphan_close.log");
-        std::fs::write(
-            &path,
-            "2026-01-01 00:00:00\tCLOSE\t\t1\t99\tUNDEAD\tBTC\t500000.00000000\t511112.13000000\t11112.13000000\t0.022224\t167.780000\t0.00300000\t0xdef\n",
-        ).unwrap();
-        let result = replay_log(path.to_str().unwrap());
-        assert!(result.is_err(), "a CLOSE referencing a pivot_id with no prior OPEN should be a hard error, not silently ignored");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_replay_log_misfire_does_not_create_an_open_pivot() -> ErrStr<()> {
-        let path = std::env::temp_dir().join("auto_trading_test_misfire.log");
-        let path_str = path.to_str().unwrap();
-        let _ = std::fs::remove_file(&path); // clean slate -- log_misfire appends, it doesn't truncate
-        let snap = BalanceSnapshot {
-            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
-            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0
-        };
-        let cum = CumulativeStats::default();
-        log_misfire(path_str, None, "UNDEAD", "BTC", 500_000.0, 0.0, "",
-                    &snap, &cum);
-
-        let (opens, next_pivot, next_close, stats) = replay_log(path_str)?;
-        assert!(opens.is_empty(),
-                "a MISFIRE must never be replayed as a real open pivot");
-        assert_eq!(next_pivot, 1,
-                   "id counters must not advance from a MISFIRE");
-        assert_eq!(next_close, 1);
-        assert_eq!(stats.total_opens, 0);
-        assert_eq!(stats.total_closes, 0);
-
-        let _ = std::fs::remove_file(&path);
-        Ok(())
-    }
-
-
-    #[test]
-    fn test_replay_log_rejects_misfire_with_a_pivot_id() {
-        let path =
-           std::env::temp_dir().join("auto_trading_test_misfire_bad.log");
-        let path_str = path.to_str().unwrap();
-        let _ = std::fs::remove_file(&path);
-        let snap = BalanceSnapshot {
-            asset_balance: 0.005, asset_committed: 0.0, asset_available: 0.005,
-            undead_balance: 500_000.0, undead_committed: 0.0, undead_available: 500_000.0,
-        };
-        let cum = CumulativeStats::default();
-        log_row(path_str, None, "MISFIRE", Some(1), None, None, "UNDEAD", "BTC", 500_000.0, 0.0, None, None, None, 0.0, "", &snap, &cum);
-
-        let result = replay_log(path_str);
-        assert!(result.is_err(), "a MISFIRE row must never carry a pivot_id -- that would make it indistinguishable from a real OPEN");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_classify_misfire_quote_moved_below_floor() {
-        let (why, _how) = classify_misfire("Quote moved below your floor while unlocking the keystore (0.00490000 BTC quoted, but only 0.00485000 BTC is guaranteed at 50 bps slippage tolerance -- need > 0.00500000 BTC). That's not happening. No funds used.");
-        assert!(why.contains("price moved"),
-                "expected floor-slippage classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_keystore_decrypt_failure() {
-        let (why, _how) = classify_misfire("Could not decrypt keystore, path /tmp/x.json: invalid password. No funds moved.");
-        assert!(why.contains("could not be decrypted"), "expected keystore classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_wrong_wallet_address() {
-        let (why, _how) = classify_misfire("Keystore address (0xabc) does not match expected address (0xdef) — refusing to proceed. No funds moved.");
-        assert!(why.contains("different wallet"), "expected address-mismatch classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_reverted_on_chain() {
-        let (why, _how) = classify_misfire("Swap transaction REVERTED on-chain. Hash: 0xabc123");
-        assert!(why.contains("reverted"), "expected revert classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_dropped_or_replaced() {
-        let (why, _how) = classify_misfire("Swap transaction was dropped or replaced. Hash: 0xabc123");
-        assert!(why.contains("dropped or replaced"), "expected drop/replace classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_kyberswap_failure() {
-        let (why, _how) = classify_misfire("KyberSwap route request failed: connection reset");
-        assert!(why.contains("KyberSwap"), "expected KyberSwap classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_rpc_failure() {
-        let (why, _how) = classify_misfire("RPC request (eth_call) failed: timed out");
-        assert!(why.contains("RPC"), "expected RPC classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_missing_token_entry() {
-        let (why, _how) = classify_misfire("No tokens.toml entry for 'FOO' — add one before checking this pool");
-        assert!(why.contains("tokens.toml"), "expected tokens.toml classification, got: '{why}'");
-    }
-
-    #[test]
-    fn test_classify_misfire_falls_back_on_unrecognized_error() {
-        let (why, how) = classify_misfire("something totally unexpected happened");
-        assert!(why.contains("not a recognized failure shape"), "expected fallback classification, got: '{why}'");
-        assert!(how.contains("raw error"), "expected fallback hint to point at the raw error, got: '{how}'");
-    }
-
-    #[test]
-    fn test_report_misfire_open_does_not_panic() {
-        report_misfire(MisfireStage::Open, None, "BTC", "UNDEAD", 0.005, "some error");
-    }
-
-    #[test]
-    fn test_report_misfire_close_does_not_panic() {
-        report_misfire(MisfireStage::Close, Some(12), "UNDEAD", "BTC", 500_000.0, "Swap transaction REVERTED on-chain. Hash: 0xdef");
-    }
-*/
 }
