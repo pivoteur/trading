@@ -4,3 +4,7 @@
 * We know HOWTO [check pivot asset balances on a wallet](../b_balances)
 
 Let's now combine the above to compute available assets.
+
+-----
+
+[source](mod.rs)

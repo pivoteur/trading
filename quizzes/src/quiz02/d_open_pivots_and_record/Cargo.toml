@@ -1,0 +1,17 @@
+[package]
+name = "d_open_pivots_and_record"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+book = { path = "../../../../../crypto-n-rust/src/libs/book" }
+libs = { path = "../../../../../protocol/libs" }
+trading = { path = "../../../../libs" }
+quizzes = { path = "../../.." }
+
+clap = { version = "4.6.6", features = ["derive"] }
+tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+paste = "1.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
