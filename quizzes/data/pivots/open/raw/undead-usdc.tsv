@@ -1,0 +1,3 @@
+opened	open	close	tx_id	updated	from	from_blockchain	amount1	virtual	quote1	val1	gain_10_percent	to	to_blockchain	net	ersatz	quote2	val2
+2026-09-22	1	0	https://snowtrace.io/tx/0x0123	n/a	UNDEAD	Avalanche	500	0	$0.0005144	$0.25	550	USDC	Avalanche	0.25	0	$1.00	$0.25
+2026-09-22	2	0	https://snowtrace.io/tx/0x0234	n/a	USDC	Avalanche	0.25	0	$1.00	$0.25	0.275	UNDEAD	Avalanche	500	0	$0.0005144	$0.25
