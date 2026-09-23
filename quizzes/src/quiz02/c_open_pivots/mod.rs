@@ -74,13 +74,13 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    }
 }
 
-fn compute_available_assets(pool: &Pool, balances: &Composition,
-                            committed: &Assets, quotes: &Quotes)
-      -> ErrStr<Composition> {
+fn compute_available_assets(quotes: &Quotes, blockchain: &Blockchain,
+                            pool: &Pool, balances: &Composition,
+                            committed: &Assets) -> ErrStr<Composition> {
    let mut available = balances.as_assets();
    committed.assets().iter().for_each(|asset| available.subtract(asset));
    available.update_prices(quotes)?;
-   available.as_composition(pool, quotes)
+   available.as_composition(blockchain, pool, quotes)
 }
 
 async fn runoff_continuation(pool: &Pool, addy: &str, blockchain: &Blockchain,
@@ -93,10 +93,11 @@ async fn runoff_continuation(pool: &Pool, addy: &str, blockchain: &Blockchain,
    let file = lines_from_file(path)?;
    let ((opens, _closes), _dt) =
       parse_pivots(pool, file, &quotes.aliases, debug)?;
-   let mut committed = pivot_assets(&opens)?;
-   let commie = committed.as_composition(pool, quotes)?;
+   let committed = pivot_assets(&opens)?;
+   let commie = committed.as_composition(blockchain, pool, quotes)?;
    print_composition("Assets committed to pivots", &commie);
-   let available = compute_available_assets(pool, &bal, &committed, quotes)?;
+   let available =
+      compute_available_assets(quotes, blockchain, pool, &bal, &committed)?;
    print_composition("Available assets", &available);
    Ok(())
 }

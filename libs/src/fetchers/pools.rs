@@ -39,7 +39,7 @@ fn coin<'a>(b: &'a Blockchain, q: &'a Quotes, d: &'a NaiveDate, addy: &'a str,
          let bal0 = fetch_token_balance(b, addy, &token, r, debug).await?;
          let bal = bal0.unwrap_or(0.0);
          let qt = q.lookup(&token)?;
-         Ok(mk_coin(&(b.blockchain(), token), bal, &mk_usd(qt), d))
+         Ok(mk_coin(&(b.clone(), token), bal, &mk_usd(qt), d))
       })
    }
 }
