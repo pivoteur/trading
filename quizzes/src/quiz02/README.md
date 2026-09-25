@@ -7,7 +7,7 @@ an asset.
 * [b_balances](b_balances): now let's read the balances of a pivot pool on a
 wallet.
 * [c_avails](c_avails): compute available assets
-* [d_targe_trade_amounts](d_targe_trade_amounts): incorporate current prices
+* [d_target_trade_amounts](d_target_trade_amounts): incorporate current prices
 and proposed pivot amounts
 
 <!--
