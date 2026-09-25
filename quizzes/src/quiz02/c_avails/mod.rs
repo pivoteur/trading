@@ -10,7 +10,6 @@ use book::{
 };
 
 use libs::{
-   collections::assets::Assets,
    fetchers::{ pivots::parse_pivots, quotes::fetch_quotes },
    types::{
       blockchains::{ Blockchain, Blockchain::AVALANCHE },
@@ -74,15 +73,6 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    }
 }
 
-fn compute_available_assets(quotes: &Quotes, blockchain: &Blockchain,
-                            pool: &Pool, balances: &Composition,
-                            committed: &Assets) -> ErrStr<Composition> {
-   let mut available = balances.as_assets();
-   committed.assets().iter().for_each(|asset| available.subtract(asset));
-   available.update_prices(quotes)?;
-   available.as_composition(blockchain, pool, quotes)
-}
-
 async fn runoff_continuation(pool: &Pool, addy: &str, blockchain: &Blockchain,
                              path: &str, date: &NaiveDate, quotes: &Quotes, 
                              registry: &TokenRegistry, debug: bool)
@@ -97,7 +87,7 @@ async fn runoff_continuation(pool: &Pool, addy: &str, blockchain: &Blockchain,
    let commie = committed.as_composition(blockchain, pool, quotes)?;
    print_composition("Assets committed to pivots", &commie);
    let available =
-      compute_available_assets(quotes, blockchain, pool, &bal, &committed)?;
+      bal.compute_available_assets(quotes, blockchain, pool, &committed)?;
    print_composition("Available assets", &available);
    Ok(())
 }
@@ -130,4 +120,3 @@ mod functional_tests {
                               yday, &quotes, &registry, true))?;
    });
 }
-

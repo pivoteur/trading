@@ -1,5 +1,5 @@
 [package]
-name = "d_open_pivots_and_record"
+name = "d_target_trade_amounts"
 version = "0.1.0"
 edition = "2024"
 
