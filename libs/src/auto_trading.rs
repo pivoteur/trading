@@ -43,7 +43,9 @@ fn api_url(blockchain: &Blockchain) -> String {
 
 pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
                          tok: &str, debug: bool) -> ErrStr<USD> {
+   debug!("query_quote", debug);
    let amt = if tok == "USDC" {
+      log!("defaulting USDC price to $1.00");
       1.0
    } else {
       query_swap(blockchain, registry, tok, "USDC",
@@ -56,6 +58,7 @@ pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
                         from: &str, to: &str, amount: f32, debug: bool)
       -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
+    let swap_is = format!("swap {amount} {from} -> {to}");
     let from_entry = registry.token(from)?;
     let to_entry = registry.token(to)?;
     fn addy(tok: &str, entry: &TokenEntry) -> ErrStr<String> {
@@ -71,7 +74,7 @@ pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
                       tok("In", &token_in), tok("Out", &token_out),
                       amount_in_base);
 
-    log!("I am calling kyber...");
+    log!("I am calling kyber with {}", swap_is);
     let resp = err_or(http_client()?
         .get(&url)
         .header("X-Client-Id", "pivoteur-autotrader")
@@ -106,7 +109,7 @@ Raw body: {raw_body}"))?;
     let raw: u128 = err_or(amount_out_str.parse(),
         &format!("Could not parse amountOut '{amount_out_str}'"))?;
     let amount_out = raw as f32 / 10f32.powi(to_entry.decimals as i32);
-
+    log!("For {}, ratio is {}", swap_is, amount_out);
     Ok(KyberSwap { amount_out, route_summary_raw, router_address })
 }
 

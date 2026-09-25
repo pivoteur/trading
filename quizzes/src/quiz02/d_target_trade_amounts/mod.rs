@@ -35,7 +35,7 @@ use trading::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name="balancer")]
+#[command(name="targeter")]
 #[command(version="0.1.1")]
 struct Args {
 
@@ -68,7 +68,7 @@ struct Args {
 }
 
 fn compute_coin<'a>(chain: &'a Blockchain, date: &'a NaiveDate,
-                          registry: &'a TokenRegistry, debug: bool)
+                    registry: &'a TokenRegistry, debug: bool)
       -> impl Fn((String, f32))
       -> Pin<Box<dyn Future<Output = ErrStr<(Coin, (String, f32))>> + 'a>> {
    move | (token, max_amt): (String, f32) | Box::pin(async move {
@@ -152,9 +152,9 @@ mod functional_tests {
    use book::{ create_testing, date_utils::yesterday, utils::now };
    use trading::consts::{ UNDEAD, test_wallets::TEST_ADDRESS };
 
-   create_testing!("c_avails");
+   create_testing!("d_target_trade_amounts");
 
-   run!("avail", {
+   run!("targets", {
       let ava = &AVALANCHE;
       let yday = &yesterday();
       let registry = now(fetch_token_registry(ava))?;
