@@ -53,7 +53,7 @@ fn runoff_continuation(quotes: &Quotes, path: &str,
    let ((opens, _closes), _dt) = parse_pivots(&pool, file, aliases, debug)?;
    println!("Committed assets:
 
-{}", list_csv(&pivot_assets(&opens)?.assets()));
+{}", list_csv(&pivot_assets(&opens)?.assets(), true));
    Ok(())
 }
 
