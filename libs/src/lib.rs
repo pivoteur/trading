@@ -5,4 +5,5 @@ pub mod fetchers;
 pub mod git_resources;
 pub mod hex;
 pub mod path_utils;
+pub mod processors;
 pub mod types;
