@@ -6,3 +6,4 @@ pub mod git_resources;
 pub mod hex;
 pub mod path_utils;
 pub mod types;
+pub mod wallets;
