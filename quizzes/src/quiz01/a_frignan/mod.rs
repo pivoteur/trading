@@ -1,6 +1,6 @@
 use trading::{
-   auto_trading::query_quote,
-   fetchers::tokens::fetch_token_registry
+   types::wallets::Wallet,
+   wallets::avalanche::mocks::connect_to_avalanche
 };
 use book::{
    parse_args_add_banner,
@@ -16,7 +16,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.2.2")]
+#[command(version = "1.3.0")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -32,16 +32,15 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
-  runoff_continuation(&args.blockchain, &args.token, args.debug).await
+  // TODO: FIXME currently only works with avalanche!!!
+  let wallet = connect_to_avalanche("0x1213", "abc", args.debug).await?;
+  runoff_continuation(&wallet, &args.token).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain, from_token: &str,
-                             debug: bool) -> ErrStr<()> {
-    let registry = fetch_token_registry(blockchain).await?;
-    let quote =
-       query_quote(blockchain, &registry, from_token, debug).await?;
-    println!("{from_token}'s price is {quote}");
-    Ok(())
+async fn runoff_continuation<W: Wallet>(wallet: &W, token: &str) -> ErrStr<()> {
+   let quote = wallet.quote(token).await?;
+   println!("{token}'s price is {quote}");
+   Ok(())
 }
 
 //=========================================================================
@@ -57,10 +56,12 @@ pub mod functional_test {
     create_testing!("quiz01::a_frignan");
 
     run!("frignan_btc", {
-        now(runoff_continuation(&AVALANCHE, "BTC", true))?
+        let wallet = now(connect_to_avalanche("0x123", "sdf", true))?;
+        now(runoff_continuation(&wallet, "BTC"))?
     });
 
     run!("frignan_undead", {
-        now(runoff_continuation(&AVALANCHE, "UNDEAD", false))?
+        let wallet = now(connect_to_avalanche("0x123", "sdf", false))?;
+        now(runoff_continuation(&wallet, "UNDEAD"))?
     });
 }

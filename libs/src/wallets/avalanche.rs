@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{
    auto_trading::query_quote,
-   fetchers::{ tokens::fetch_token_registry },
+   fetchers::{ tokens::fetch_token_registry, wallets::fetch_wallet_balances },
    types::{
       balances::tokens::TokenBalance,
       tokens::TokenRegistry,
@@ -22,7 +22,8 @@ use libs::types::blockchains::Blockchain::AVALANCHE;
 pub struct Ava {
    address: String,
    keystore_path: String,
-   tokens: TokenRegistry
+   tokens: TokenRegistry,
+   debug: bool
 }
 
 impl fmt::Debug for Ava {
@@ -31,16 +32,18 @@ impl fmt::Debug for Ava {
        .field("address", &self.address)
        .field("keystore_path", &"***")
        .field("tokens", &"Avalance tokens")
+       .field("debug", &self.debug)
        .finish()
    }
 }
 
 impl Wallet for Ava {
    async fn quote(&self, token: &str) -> ErrStr<USD> {
-      query_quote(&AVALANCHE, &self.tokens, token, false).await
+      query_quote(&AVALANCHE, &self.tokens, token, self.debug).await
    }
    async fn balances(&self) -> ErrStr<Vec<TokenBalance>> {
-      not_implemented!("balances")
+      fetch_wallet_balances(&AVALANCHE, &self.tokens,
+                            &self.address, self.debug).await
    }
    async fn send(&self) -> ErrStr<()> {
       not_implemented!("send")
@@ -50,10 +53,10 @@ impl Wallet for Ava {
    }
 }
 
-pub async fn connect_to_avalanche(addy: &str, keystore_path: &str)
+pub async fn connect_to_avalanche(addy: &str, keystore_path: &str, debug: bool)
       -> ErrStr<Ava> {
    let tokens = fetch_token_registry(&AVALANCHE).await?;
-   Ok(Ava { address: s(addy), keystore_path: s(keystore_path), tokens })
+   Ok(Ava { address: s(addy), keystore_path: s(keystore_path), tokens, debug })
 }
 
 // ----- MOCKS -------------------------------------------------------
@@ -66,13 +69,18 @@ pub mod mocks {
       err_utils::ErrStr
    };
 
-   use crate::types::{
-      balances::tokens::{ TokenBalance, mk_token_balance },
-      wallets::Wallet
+   use crate::{
+      auto_trading::query_quote,
+      fetchers::tokens::fetch_token_registry,
+      types::{
+         balances::tokens::{ TokenBalance, mk_token_balance },
+         wallets::Wallet
+      }
    };
 
-   #[derive(Default)]
-   pub struct MockAva;
+   use libs::types::blockchains::Blockchain::AVALANCHE;
+
+   pub struct MockAva { debug: bool }
 
    impl fmt::Debug for MockAva {
       fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -80,14 +88,16 @@ pub mod mocks {
           .field("address", &"mocked")
           .field("keystore_path", &"***")
           .field("tokens", &"Avalanche tokens")
-          .field("debug", &true)
+          .field("debug", &self.debug)
           .finish()
       }
    }
 
    impl Wallet for MockAva {
-      async fn quote(&self, _token: &str) -> ErrStr<USD> {
-         Ok(mk_usd(1.23))
+      async fn quote(&self, token: &str) -> ErrStr<USD> {
+         let ava = &AVALANCHE;
+         let tokens = fetch_token_registry(ava).await?;
+         query_quote(&AVALANCHE, &tokens, token, self.debug).await
       }
       async fn balances(&self) -> ErrStr<Vec<TokenBalance>> {
          Ok(vec![mk_token_balance("BTC", mk_usd(83456.0), 1.0),
@@ -102,9 +112,9 @@ pub mod mocks {
       }
    }
 
-   pub async fn connect_to_avalanche(_addy: &str, _keystore_path: &str)
-         -> ErrStr<MockAva> {
-      Ok(MockAva::default())
+   pub async fn connect_to_avalanche(_addy: &str, _keystore_path: &str,
+                                     debug: bool) -> ErrStr<MockAva> {
+      Ok(MockAva { debug })
    }
 
    // ----- TESTS -------------------------------------------------------
@@ -124,11 +134,11 @@ pub mod mocks {
       create_testing!("wallets::mocks::avalanche");
 
       run!("connect_to_avalanche", " (mock)", {
-         let wallet = now(connect_to_avalanche("0x123", "xyz"))?;
+         let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
          println!("My Avalanche wallet is:\n{wallet:?}");
       });
       run!("balances", " (mock)", {
-         let wallet = now(connect_to_avalanche("0x123", "xyz"))?;
+         let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
          let balances = now(wallet.balances())?;
          println!("Wallet balances:\n{}", as_csv(&balances, true)?);
       });
@@ -141,10 +151,10 @@ pub mod mocks {
       use book::err_utils::ErrStr;
       use crate::types::wallets::Wallet;
 
-      #[tokio::test] async fn test_quote_avax() -> ErrStr<()> {
-         let wallet = connect_to_avalanche("0x123", "xyz").await?;
-         let avax = wallet.quote("AVAX").await?;
-         assert_eq!(avax.amount(), 1.23);
+      #[tokio::test] async fn test_quote_avax_ok() -> ErrStr<()> {
+         let wallet = connect_to_avalanche("0x123", "xyz", true).await?;
+         let avax = wallet.quote("AVAX").await;
+         assert!(avax.is_ok());
          Ok(())
       }
    }
@@ -162,12 +172,12 @@ mod functional_tests {
    create_testing!("wallets::avalanche");
 
    run!("connect_to_avalanche", {
-      let wallet = now(connect_to_avalanche("0x123", "xyz"))?;
+      let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
       println!("My Avalanche wallet is\n{wallet:?}");
    });
 
    run!("btc_quote", {
-      let wallet = now(connect_to_avalanche("0x123", "xyz"))?;
+      let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
       let btc = now(wallet.quote("btc"))?;
       println!("The quote for BTC is {btc}");
    });
