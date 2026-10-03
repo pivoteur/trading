@@ -30,6 +30,8 @@ listing each token's address and decimals.
 
 ## Revisions
 
+* 1.3.0, 2026-10-03: switched to `Wallet` implementation (Avalanche-only at
+present)
 * 1.2.2, 2026-09-20: use query_quote lib function
 * 1.2.1, 2026-09-18: directory-restructuring
 * 1.2.0, 2026-09-15: library-refactoring
