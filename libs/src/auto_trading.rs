@@ -20,21 +20,12 @@ use super::{
    consts::DUST_EPSILON,
    hex::pad_address_for_call,
    fetchers::wallets::fetch_token_balance,
-   types::tokens::{ TokenRegistry, TokenEntry }
+   types::{ rest::kyber::KyberSwap, tokens::TokenRegistry }
 };
 
 //============================================================================
 //----- Live KyberSwap Quote --------------------------------------------------
 //============================================================================
-
-/// A live quote plus everything needed to actually build and sign the swap
-/// afterward.
-#[derive(Debug)]
-pub struct KyberSwap {
-    pub amount_out:         f32,
-    pub route_summary_raw:  Value,
-    pub router_address:     String
-}
 
 fn api_url(blockchain: &Blockchain) -> String {
     let base_url = "https://aggregator-api.kyberswap.com";
@@ -54,63 +45,82 @@ pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
    Ok(mk_usd(amt))
 }
 
-pub async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
-                        from: &str, to: &str, amount: f32, debug: bool)
-      -> ErrStr<KyberSwap> {
+// 1. Let Serde handle the nested JSON parsing and validation automatically
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KyberResponse {
+    data: KyberData,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KyberData {
+    router_address: String,
+    route_summary: Value, // Keeps the inner JSON block intact
+}
+
+pub async fn query_swap(
+       blockchain: &Blockchain, registry: &TokenRegistry,
+       from: &str, to: &str, amount: f32, debug: bool) -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
-    let swap_is = format!("swap {amount} {from} -> {to}");
+    
     let from_entry = registry.token(from)?;
     let to_entry = registry.token(to)?;
-    fn addy(tok: &str, entry: &TokenEntry) -> ErrStr<String> {
-       entry.address.clone().ok_or(format!("No address for token {tok}"))
-    }
-    let token_in = addy(from, &from_entry)?;
-    let token_out = addy(to, &to_entry)?;
+    
+    let token_in = from_entry.address.as_ref()
+                             .ok_or_else(|| format!("No address for {from}"))?;
+    let token_out = to_entry.address.as_ref()
+                            .ok_or_else(|| format!("No address for {to}"))?;
+    
     let amount_in_base =
        (amount * 10f32.powi(from_entry.decimals as i32)).round() as u128;
+    
+    // 2. Use reqwest's query params instead of manual string formatting
+    let url = format!("{}/routes", api_url(blockchain));
+    let query = [("tokenIn", token_in), ("tokenOut", token_out),
+                 ("amountIn", &amount_in_base.to_string())];
 
-    fn tok(dir: &str, token: &str) -> String { format!("token{dir}={token}") }
-    let url = format!("{}/routes?{}&{}&amountIn={}", api_url(blockchain),
-                      tok("In", &token_in), tok("Out", &token_out),
-                      amount_in_base);
+    let swap = format!("swap {amount} {from} -> {to}");
+    log!("I am calling kyber with {}", swap);
 
-    log!("I am calling kyber with {}", swap_is);
-    let resp = err_or(http_client()?
+    let moz = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+    let apple = "AppleWebKit/537.36 (KHTML, like Gecko)";
+    let chrome = "Chrome/126.0.0.0";
+    let safari = "Safari/537.36";
+    let agent = format!("{moz} {apple} {chrome} {safari}");
+
+    // 3. Chain reqwest methods directly and parse the JSON structurally
+    let res: KyberResponse = http_client()?
         .get(&url)
+        .query(&query)
         .header("X-Client-Id", "pivoteur-autotrader")
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .header("User-Agent", &agent)
         .header("Accept", "application/json")
         .send()
-        .await,
-        "KyberSwap route request failed")?;
-    let status = resp.status();
-    log!("kyber call completed: HTTP {}", status);
-    let raw_body = err_or(resp.text().await,
-                          "Could not read KyberSwap response body")?;
-    let parsed: Value = err_or(from_str(&raw_body),
-        &format!("KyberSwap response did not parse (HTTP {status})
-Raw body: {raw_body}"))?;
-    let data = parsed
-        .get("data")
-        .ok_or(format!("KyberSwap returned no route ({from} -> {to}). Raw: {raw_body}"))?;
-    let route_summary_raw = data
-        .get("routeSummary")
-        .cloned()
-        .ok_or(format!("Response missing routeSummary. Raw: {raw_body}"))?;
-    let router_address = data
-        .get("routerAddress")
+        .await
+        .map_err(|e| format!("KyberSwap route request failed: {e}"))?
+        .json() // Automatically handles text/parsing and returns KyberResponse
+        .await
+        .map_err(|e| format!("Failed to parse Kyber response: {e}"))?;
+
+    let dat = res.data;
+
+    // 4. Extract amount_out from the strongly-typed route_summary field
+    let amount_out_str = dat.route_summary.get("amountOut")
         .and_then(|v| v.as_str())
-        .ok_or(format!("Response missing routerAddress. Raw: {raw_body}"))?
-        .to_string();
-    let amount_out_str = route_summary_raw
-        .get("amountOut")
-        .and_then(|v| v.as_str())
-        .ok_or(format!("routeSummary missing amountOut. Raw: {raw_body}"))?;
-    let raw: u128 = err_or(amount_out_str.parse(),
-        &format!("Could not parse amountOut '{amount_out_str}'"))?;
+        .ok_or_else(|| "Response missing amountOut".to_string())?;
+        
+    let raw: u128 =
+       err_or(amount_out_str.parse(), "Could not parse amountOut")?;
     let amount_out = raw as f32 / 10f32.powi(to_entry.decimals as i32);
-    log!("For {}, ratio is {}", swap_is, amount_out);
-    Ok(KyberSwap { amount_out, route_summary_raw, router_address })
+
+    log!("For {}, ratio is {}", swap, amount_out);
+    
+    Ok(KyberSwap { 
+        amount_out, 
+        route_summary_raw: dat.route_summary, 
+        router_address: dat.router_address 
+    })
 }
 
 //============================================================================
