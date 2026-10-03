@@ -52,18 +52,33 @@ pub mod functional_test {
 
     create_testing!("quiz01::a_frignan");
 
-    run!("frignan_btc", {
+    run!("btc", {
         let wallet = mock_connection(&AVALANCHE, true);
         now(runoff_continuation(&wallet, "BTC"))?
     });
 
-    run!("frignan_undead", {
+    run!("undead", {
         let wallet = mock_connection(&AVALANCHE, false);
         now(runoff_continuation(&wallet, "UNDEAD"))?
     });
 
-    run!("frignan_bnb", {
+    run!("bnb", {
         let wallet = mock_connection(&BINANCE, true);
         now(runoff_continuation(&wallet, "BNB"))?
+    });
+
+    run!("doge", {
+        let wallet = mock_connection(&BINANCE, true);
+        now(runoff_continuation(&wallet, "DOGE"))?
+    });
+
+    run!("ltc", {
+        let wallet = mock_connection(&BINANCE, true);
+        now(runoff_continuation(&wallet, "ltc"))?
+    });
+
+    run!("link", {
+        let wallet = mock_connection(&BINANCE, true);
+        now(runoff_continuation(&wallet, "link"))?
     });
 }
