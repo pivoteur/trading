@@ -30,6 +30,8 @@ listing each token's address and decimals.
 
 ## Revisions
 
+* 1.3.1, 2026-10-03: generalized `Wallet` implementation to read from available
+blockchains
 * 1.3.0, 2026-10-03: switched to `Wallet` implementation (Avalanche-only at
 present)
 * 1.2.2, 2026-09-20: use query_quote lib function

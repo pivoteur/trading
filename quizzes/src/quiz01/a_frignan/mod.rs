@@ -1,7 +1,4 @@
-use trading::{
-   types::wallets::Wallet,
-   wallets::avalanche::mocks::connect_to_avalanche
-};
+use trading::{ types::wallets::Wallet, wallets::mock::mock_connection };
 use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
@@ -16,7 +13,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.3.0")]
+#[command(version = "1.3.1")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -32,8 +29,7 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
-  // TODO: FIXME currently only works with avalanche!!!
-  let wallet = connect_to_avalanche("0x1213", "abc", args.debug).await?;
+  let wallet = mock_connection(&args.blockchain, args.debug);
   runoff_continuation(&wallet, &args.token).await
 }
 
@@ -52,16 +48,22 @@ pub mod functional_test {
     use super::*;
     use paste::paste;
     use book::{ create_testing, utils::now };
+    use libs::types::blockchains::Blockchain::BINANCE;
 
     create_testing!("quiz01::a_frignan");
 
     run!("frignan_btc", {
-        let wallet = now(connect_to_avalanche("0x123", "sdf", true))?;
+        let wallet = mock_connection(&AVALANCHE, true);
         now(runoff_continuation(&wallet, "BTC"))?
     });
 
     run!("frignan_undead", {
-        let wallet = now(connect_to_avalanche("0x123", "sdf", false))?;
+        let wallet = mock_connection(&AVALANCHE, false);
         now(runoff_continuation(&wallet, "UNDEAD"))?
+    });
+
+    run!("frignan_bnb", {
+        let wallet = mock_connection(&BINANCE, true);
+        now(runoff_continuation(&wallet, "BNB"))?
     });
 }
