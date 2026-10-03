@@ -20,5 +20,3 @@ pub fn mk_token_balance(tok: &str, quote: USD, amount: f32) -> TokenBalance {
    let nav = mk_usd(quote.amount() * amount);
    TokenBalance { token: s(tok), quote, amount, nav }
 }   
-    
-

@@ -1,4 +1,5 @@
 pub mod balances;
+pub mod rest;
 pub mod stats;
 pub mod tokens;
 
