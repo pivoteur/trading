@@ -18,3 +18,15 @@ decimals = 18
 [USDT]
 address = "0x55d398326f99059fF775485246999027B3197955"
 decimals = 18
+
+[DOGE]
+address = "0xbA2aE424d960c26247Dd6c32edC70B295c744C43"
+decimals = 8
+
+[LTC]
+address = "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94"
+decimals = 18
+
+[LINK]
+address = "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD"
+decimals = 18
