@@ -62,30 +62,30 @@ mod functional_tests {
    create_testing!("wallets::mock");
 
    run!("connection_avalanche", " (mock)", {
-      let wallet = now(mock_connection(&AVALANCHE, true))?;
+      let wallet = mock_connection(&AVALANCHE, true);
       println!("My Avalanche wallet is:\n{wallet:?}");
    });
    run!("connection_binance", " (mock)", {
-      let wallet = now(mock_connection(&BINANCE, true))?;
+      let wallet = mock_connection(&BINANCE, true);
       println!("My Binance wallet is:\n{wallet:?}");
    });
    run!("balances_avalanche", " (mock)", {
-      let wallet = now(mock_connection(&AVALANCHE, true))?;
+      let wallet = mock_connection(&AVALANCHE, true);
       let balances = now(wallet.balances())?;
       println!("Avalanche Wallet balances:\n{}", as_csv(&balances, true)?);
    });
    run!("balances_binance", " (mock)", {
-      let wallet = now(mock_connection(&BINANCE, true))?;
+      let wallet = mock_connection(&BINANCE, true);
       let balances = now(wallet.balances())?;
       println!("Binance Wallet balances:\n{}", as_csv(&balances, true)?);
    });
    run!("quotes_avalanche", " (mock)", {
-      let wallet = now(mock_connection(&AVALANCHE, true))?;
+      let wallet = mock_connection(&AVALANCHE, true);
       let quote = now(wallet.quote("AVAX"))?;
       println!("AVAX quote: {quote}");
    });
    run!("quotes_binance", " (mock)", {
-      let wallet = now(mock_connection(&BINANCE, true))?;
+      let wallet = mock_connection(&BINANCE, true);
       let quote = now(wallet.quote("BNB"))?;
       println!("BNB quote: {quote}");
    });

@@ -12,7 +12,11 @@ use ethers::{
 use serde::Deserialize;
 use serde_json::{ Value, from_str, json };
 
-use book::{ debug,currency::usd::{ USD,mk_usd },err_utils::{ ErrStr,err_or } };
+use book::{
+   debug,
+   currency::usd::{ USD, mk_usd },
+   err_utils::{ ErrStr, err_or }
+};
 use libs::types::{ blockchains::Blockchain, util::Id };
 
 use super::{
@@ -63,7 +67,7 @@ pub async fn query_swap(
        blockchain: &Blockchain, registry: &TokenRegistry,
        from: &str, to: &str, amount: f32, debug: bool) -> ErrStr<KyberSwap> {
     debug!("query_swap", debug);
-    
+
     let from_entry = registry.token(from)?;
     let to_entry = registry.token(to)?;
     
