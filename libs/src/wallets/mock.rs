@@ -39,6 +39,7 @@ impl Wallet for MockWallet {
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
+   fn blockchain(&self) -> Blockchain { self.blockchain.clone() }
 }
 
 pub fn mock_connection(blockchain: &Blockchain, debug: bool) -> MockWallet {

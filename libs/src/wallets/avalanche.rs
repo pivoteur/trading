@@ -17,7 +17,7 @@ use book::{
    string_utils::s
 };
 
-use libs::types::blockchains::Blockchain::AVALANCHE;
+use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 
 pub struct Ava {
    address: String,
@@ -52,6 +52,7 @@ impl Wallet for Ava {
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
+   fn blockchain(&self) -> Blockchain { AVALANCHE }
 }
 
 pub async fn connect_to_avalanche(wallet_address: &str, keystore_path: &str,
