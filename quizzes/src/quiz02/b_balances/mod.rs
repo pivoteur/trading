@@ -83,7 +83,6 @@ mod functional_tests {
    use paste::paste;
    use book::{ create_testing, date_utils::yesterday, utils::now };
    use libs::types::pools::mk_pool;
-   use trading::consts::test_wallets::TEST_ADDRESS;
 
    create_testing!("quiz02::b_balances");
 

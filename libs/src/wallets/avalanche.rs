@@ -46,17 +46,27 @@ impl Wallet for Ava {
                             &self.address, self.debug).await
    }
    async fn send(&self) -> ErrStr<()> {
-      not_implemented!("send")
+      let keystore = &self.keystore_path;
+      not_implemented!("send", keystore)
    }
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
 }
 
-pub async fn connect_to_avalanche(addy: &str, keystore_path: &str, debug: bool)
+pub async fn connect_to_avalanche(wallet_address: &str, keystore_path: &str,
+                            debug: bool)
       -> ErrStr<Ava> {
    let tokens = fetch_token_registry(&AVALANCHE).await?;
-   Ok(Ava { address: s(addy), keystore_path: s(keystore_path), tokens, debug })
+   Ok(mk_connection_to_avalanche(tokens, wallet_address, keystore_path, debug))
+}
+
+pub fn mk_connection_to_avalanche(registry: TokenRegistry, wallet_address: &str,
+                                  keystore_path: &str, debug: bool) -> Ava {
+   Ava { address: s(wallet_address),
+         keystore_path: s(keystore_path),
+         tokens: registry,
+         debug }
 }
 
 // ----- TESTS -------------------------------------------------------

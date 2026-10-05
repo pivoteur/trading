@@ -1,20 +1,23 @@
 # dapps
 Contains the decentralized applications to automate trades.
 
-## [ `maegen` ](maegen)
- * A prorgam tired to a specified wallet and balances a token
- passed in with `$UNDEAD`, balancing the dollar value that is.
-
-## [ `sendan` ](sendan)
- * A simple prorgam that send a desired amount of token x to a
- wallet passed in.
-
 ## [ `frignan` ](frignan)
  * A price checker for the desired token on a desired blockchain.
 
+## [ `gelic` ](gelic)
+ * Returns the token-balances for a wallet
+
+## [ `sendan` ](sendan)
+ * A simple prorgam that send a desired amount of token x to a
+ wallet address.
+
 ## [ `ceap` ](ceap)
  * An auto-trader that trades any token to any token at a specified 
- amount and on any blockchain, all passed in. 
+ amount and on any blockchain.
+
+## [ `maegen` ](maegen)
+ * A program tied to a specified wallet and balances a token
+ passed in with `$UNDEAD`, balancing the dollar value.
 
 -----
 
