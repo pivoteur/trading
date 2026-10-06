@@ -13,7 +13,7 @@ use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.2.1")]
+#[command(version = "1.2.2")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -38,7 +38,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     runoff_continuation(&wallet).await
 }
 
-async fn runoff_continuation<W: Wallet>(wallet: &W) -> ErrStr<()> {
+async fn runoff_continuation(wallet: &Box<dyn Wallet>) -> ErrStr<()> {
    let balances = wallet.balances().await?;
     println!("{}", as_csv(&balances, true)?);
     Ok(())

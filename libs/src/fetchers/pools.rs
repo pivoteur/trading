@@ -7,8 +7,8 @@ use libs::{
 };
 use crate::types::wallets::Wallet;
 
-pub async fn fetch_pool_balances<W: Wallet>(wallet: &W, quotes: &Quotes,
-                                            date: &NaiveDate, pool: &Pool)
+pub async fn fetch_pool_balances(wallet: &Box<dyn Wallet>, quotes: &Quotes,
+                                 date: &NaiveDate, pool: &Pool)
       -> ErrStr<Composition> {
    let balances = wallet.balances().await?;
    let mut assets = mk_assets();

@@ -1,9 +1,13 @@
 use book::err_utils::ErrStr;
-use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
+use libs::types::blockchains::{
+   Blockchain,
+   Blockchain::AVALANCHE,
+   Blockchain::BINANCE
+};
 
 use super::{
    avalanche::mk_connection_to_avalanche,
-   // binance::connect_to_binance,
+   binance::mk_connection_to_binance
 };
 
 use crate::{
@@ -11,32 +15,52 @@ use crate::{
    types::wallets::Wallet
 };
 
-/*
-/// Factory Method returning Wallet implementation based by blockchain or Err
-pub async fn connect_wallet(mb_blockchain: Option<&Blockchain>,
-                            wallet_address: &str,
-                            keystore_path: &str, debug: bool)
-      -> ErrStr<dyn Wallet> {
-   mb_blockchain.ok_or_elsasync_and_then
-   Ok(mb_blockchain.then(|blockchain|
-        match blockchain {
-           &AVALANCHE =>
-              Ok(connect_to_avalanche(wallet_address, keystore_path, debug)),
-           // &BINANCE => connect_to_binance(wallet_address, debug)?
-           _          => Err(format!("Blockchain {blockchain} not supported"))
-        }).or(Ok(mock_connection(debug))))
-}
-*/
-
 pub async fn connect_wallet(blockchain: &Blockchain,
                             wallet_address: &str,
                             keystore_path: &str, debug: bool)
-      -> ErrStr<impl Wallet> {
+      -> ErrStr<Box<dyn Wallet>> {
    let registry = fetch_token_registry(blockchain).await?;
    match blockchain {
       &AVALANCHE =>
-         Ok(mk_connection_to_avalanche(registry, wallet_address,
-                                       keystore_path, debug)),
+         Ok(Box::new(mk_connection_to_avalanche(registry, wallet_address,
+                                       keystore_path, debug))),
+      &BINANCE =>
+         Ok(Box::new(mk_connection_to_binance(registry, wallet_address,
+                                     keystore_path, debug))),
       _ => Err(format!("Blockchain {blockchain} not supported"))
+   }
+}
+
+// ----- TESTS -------------------------------------------------------
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use paste::paste;
+   use book::{ create_testing, utils::now };
+
+   create_testing!("wallets::factory");
+
+   run!("connect_avax_wallet", {
+      let wallet = now(connect_wallet(&AVALANCHE, "0x123", "abc", true))?;
+      println!("Connected Avalanche wallet:\n\n{wallet}");
+   });
+
+   run!("connect_binance_wallet", {
+      let wallet = now(connect_wallet(&BINANCE, "0xabc", "xyz", false))?;
+      println!("Connected Binance wallet:\n\n{wallet}");
+   });
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod tests {
+   use super::*;
+   use libs::types::blockchains::Blockchain::ETHEREUM;
+
+   #[tokio::test] async fn fail_connect_to_ethereum() {
+      let wallet = connect_wallet(&ETHEREUM, "0xa1b2c3", "path", true).await;
+      assert!(wallet.is_err(), "Should not connect to Ethereum");
    }
 }

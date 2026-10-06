@@ -1,3 +1,7 @@
+use std::fmt;
+
+use async_trait::async_trait;
+
 use crate::{
    auto_trading::query_quote,
    fetchers::tokens::fetch_token_registry,
@@ -21,6 +25,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 #[derive(Debug)]
 pub struct MockWallet { blockchain: Blockchain, debug: bool }
 
+#[async_trait(?Send)]
 impl Wallet for MockWallet {
    async fn quote(&self, token: &str) -> ErrStr<USD> {
       let chain = &self.blockchain;
@@ -47,10 +52,15 @@ impl Wallet for MockWallet {
    fn token_registry(&self) -> &TokenRegistry {
       not_implemented!("token_registry")
    }
+    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // You can use the concrete type's format logic here
+        write!(f, "{:?}", self)
+    }
 }
 
-pub fn mock_connection(blockchain: &Blockchain, debug: bool) -> MockWallet {
-   MockWallet { blockchain: blockchain.clone(), debug }
+pub fn mock_connection(blockchain: &Blockchain, debug: bool)
+      -> Box<dyn Wallet> {
+   Box::new(MockWallet { blockchain: blockchain.clone(), debug })
 }
 
 // ----- TESTS -------------------------------------------------------
@@ -71,11 +81,11 @@ mod functional_tests {
 
    run!("connection_avalanche", " (mock)", {
       let wallet = mock_connection(&AVALANCHE, true);
-      println!("My Avalanche wallet is:\n{wallet:?}");
+      println!("My Avalanche wallet is:\n{wallet}");
    });
    run!("connection_binance", " (mock)", {
       let wallet = mock_connection(&BINANCE, true);
-      println!("My Binance wallet is:\n{wallet:?}");
+      println!("My Binance wallet is:\n{wallet}");
    });
    run!("balances_avalanche", " (mock)", {
       let wallet = mock_connection(&AVALANCHE, true);
