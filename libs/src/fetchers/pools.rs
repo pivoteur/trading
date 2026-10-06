@@ -27,7 +27,7 @@ mod functional_tests {
    use paste::paste;
    use book::{
       create_testing,
-      csv_utils::list_csv,
+      csv_utils::{ as_csv, list_csv },
       date_utils::yesterday,
       utils::now
    };
@@ -45,6 +45,8 @@ mod functional_tests {
       let qt = now(fetch_quotes(yday))?;
       let pool = compute_pool(&qt, "btc", "eth", true)?;
       let wallet = mock_connection(ava, true);
+      println!("Assets on (mock) wallet:\n\n{}",
+               as_csv(&now(wallet.balances())?, true)?);
       let btc_eth = now(fetch_pool_balances(&wallet, &qt, yday, &pool))?;
       println!("{pool} pivot pool:\n\n{}", list_csv(&[btc_eth], true))
    });

@@ -3,6 +3,7 @@ use crate::{
    fetchers::tokens::fetch_token_registry,
    types::{
       balances::tokens::{ TokenBalance, mk_token_balance },
+      tokens::TokenRegistry,
       wallets::Wallet
    }
 };
@@ -39,7 +40,13 @@ impl Wallet for MockWallet {
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
-   fn blockchain(&self) -> Blockchain { self.blockchain.clone() }
+   fn blockchain(&self) -> &Blockchain { &self.blockchain }
+   fn keystore_path(&self) -> &str { not_implemented!("keystore_path") }
+   fn wallet_address(&self) -> &str { not_implemented!("wallet_address") }
+   fn debug(&self) -> bool { true }
+   fn token_registry(&self) -> &TokenRegistry {
+      not_implemented!("token_registry")
+   }
 }
 
 pub fn mock_connection(blockchain: &Blockchain, debug: bool) -> MockWallet {

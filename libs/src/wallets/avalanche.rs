@@ -1,22 +1,11 @@
 use std::fmt;
 
 use crate::{
-   auto_trading::query_quote,
-   fetchers::{ tokens::fetch_token_registry, wallets::fetch_wallet_balances },
-   types::{
-      balances::tokens::TokenBalance,
-      tokens::TokenRegistry,
-      wallets::Wallet
-   }
+   fetchers::tokens::fetch_token_registry,
+   types::{ tokens::TokenRegistry, wallets::Wallet }
 };
 
-use book::{
-   not_implemented,
-   currency::usd::USD,
-   err_utils::ErrStr,
-   string_utils::s
-};
-
+use book::{ not_implemented, err_utils::ErrStr, string_utils::s };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 
 pub struct Ava {
@@ -38,13 +27,6 @@ impl fmt::Debug for Ava {
 }
 
 impl Wallet for Ava {
-   async fn quote(&self, token: &str) -> ErrStr<USD> {
-      query_quote(&AVALANCHE, &self.tokens, token, self.debug).await
-   }
-   async fn balances(&self) -> ErrStr<Vec<TokenBalance>> {
-      fetch_wallet_balances(&AVALANCHE, &self.tokens,
-                            &self.address, self.debug).await
-   }
    async fn send(&self) -> ErrStr<()> {
       let keystore = &self.keystore_path;
       not_implemented!("send", keystore)
@@ -52,7 +34,11 @@ impl Wallet for Ava {
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
-   fn blockchain(&self) -> Blockchain { AVALANCHE }
+   fn blockchain(&self) -> &Blockchain { &AVALANCHE }
+   fn debug(&self) -> bool { self.debug }
+   fn keystore_path(&self) -> &str { &self.keystore_path }
+   fn token_registry(&self) -> &TokenRegistry { &self.tokens }
+   fn wallet_address(&self) -> &str { &self.address }
 }
 
 pub async fn connect_to_avalanche(wallet_address: &str, keystore_path: &str,

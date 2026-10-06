@@ -13,7 +13,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.3.1")]
+#[command(version = "1.3.2")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,

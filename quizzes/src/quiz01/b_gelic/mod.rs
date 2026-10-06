@@ -13,7 +13,7 @@ use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.2.0")]
+#[command(version = "1.2.1")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
