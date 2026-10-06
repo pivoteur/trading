@@ -21,7 +21,7 @@ pub struct TokenEntry {
     pub decimals: usize
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TokenRegistry {
    tokens: HashMap<String, TokenEntry>
 }

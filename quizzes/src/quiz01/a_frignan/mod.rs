@@ -13,7 +13,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.3.1")]
+#[command(version = "1.3.3")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -33,7 +33,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
   runoff_continuation(&wallet, &args.token).await
 }
 
-async fn runoff_continuation<W: Wallet>(wallet: &W, token: &str) -> ErrStr<()> {
+async fn runoff_continuation(wallet: &Box<dyn Wallet>, token: &str)
+      -> ErrStr<()> {
    let quote = wallet.quote(token).await?;
    println!("{token}'s price is {quote}");
    Ok(())

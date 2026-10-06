@@ -7,16 +7,13 @@ use book::{
     err_utils::ErrStr
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
-use trading::fetchers::{
-   tokens::fetch_token_registry,
-   wallets::fetch_wallet_balances
-};
+use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
 
 //----- CLI -------------------------------------------------------
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.1.4")]
+#[command(version = "1.2.2")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -34,14 +31,15 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
-    runoff_continuation(&args.blockchain, &args.wallet_address,
-                        args.debug).await
+    let mu_keystore = "xyz"; // we only read from this wallet
+    let wallet =
+       connect_wallet(&args.blockchain, &args.wallet_address, mu_keystore,
+                      args.debug).await?;
+    runoff_continuation(&wallet).await
 }
 
-async fn runoff_continuation(b: &Blockchain, addy: &str, debug: bool)
-      -> ErrStr<()> {
-   let registry = fetch_token_registry(b).await?;
-   let balances = fetch_wallet_balances(b, &registry, addy, debug).await?;
+async fn runoff_continuation(wallet: &Box<dyn Wallet>) -> ErrStr<()> {
+   let balances = wallet.balances().await?;
     println!("{}", as_csv(&balances, true)?);
     Ok(())
 }
@@ -55,15 +53,17 @@ pub mod functional_tests {
     use paste::paste;
     use book::{ create_testing, utils::now };
     use libs::types::blockchains::Blockchain::BINANCE;
-    use trading::consts::test_wallets::TEST_ADDRESS;
+    use trading::wallets::mock::mock_connection;
 
     create_testing!("quiz01::b_gelic");
 
-    run!("gelic_avalanche",
-        now(runoff_continuation(&AVALANCHE, TEST_ADDRESS, true))?
-    );
+    run!("gelic_avalanche", {
+        let wallet = mock_connection(&AVALANCHE, true);
+        now(runoff_continuation(&wallet))?
+    });
 
-    run!("gelic_binance",
-        now(runoff_continuation(&BINANCE, TEST_ADDRESS, true))?
-    );
+    run!("gelic_binance", {
+        let wallet = mock_connection(&BINANCE, true);
+        now(runoff_continuation(&wallet))?
+    });
 }

@@ -101,7 +101,7 @@ mod functional_tests {
     use book::{ create_testing, utils::now };
     use libs::types::blockchains::Blockchain::AVALANCHE;
     use trading::{
-       consts::{ UNDEAD, test_wallets::TEST_ADDRESS },
+       consts::UNDEAD,
        fetchers::wallets::fetch_token_balance
     };
 

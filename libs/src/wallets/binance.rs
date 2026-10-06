@@ -7,28 +7,28 @@ use crate::{
 };
 
 use book::{ not_implemented, err_utils::ErrStr, string_utils::s };
-use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
+use libs::types::blockchains::{ Blockchain, Blockchain::BINANCE };
 
-pub struct Ava {
+pub struct Bsc {
    address: String,
    keystore_path: String,
    tokens: TokenRegistry,
    debug: bool
 }
 
-impl fmt::Debug for Ava {
+impl fmt::Debug for Bsc {
    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      f.debug_struct("Ava")
+      f.debug_struct("Bsc")
        .field("address", &self.address)
        .field("keystore_path", &"***")
-       .field("tokens", &"Avalance tokens")
+       .field("tokens", &"Binance tokens")
        .field("debug", &self.debug)
        .finish()
    }
 }
 
 #[async_trait(?Send)]
-impl Wallet for Ava {
+impl Wallet for Bsc {
    async fn send(&self) -> ErrStr<()> {
       let keystore = &self.keystore_path;
       not_implemented!("send", keystore)
@@ -36,7 +36,7 @@ impl Wallet for Ava {
    async fn trade(&self) -> ErrStr<()> {
       not_implemented!("trade")
    }
-   fn blockchain(&self) -> &Blockchain { &AVALANCHE }
+   fn blockchain(&self) -> &Blockchain { &BINANCE }
    fn debug(&self) -> bool { self.debug }
    fn keystore_path(&self) -> &str { &self.keystore_path }
    fn token_registry(&self) -> &TokenRegistry { &self.tokens }
@@ -47,16 +47,15 @@ impl Wallet for Ava {
     }
 }
 
-pub async fn connect_to_avalanche(wallet_address: &str, keystore_path: &str,
-                            debug: bool)
-      -> ErrStr<Ava> {
-   let tokens = fetch_token_registry(&AVALANCHE).await?;
-   Ok(mk_connection_to_avalanche(tokens, wallet_address, keystore_path, debug))
+pub async fn connect_to_binance(wallet_address: &str, keystore_path: &str,
+                                debug: bool) -> ErrStr<Bsc> {
+   let tokens = fetch_token_registry(&BINANCE).await?;
+   Ok(mk_connection_to_binance(tokens, wallet_address, keystore_path, debug))
 }
 
-pub fn mk_connection_to_avalanche(registry: TokenRegistry, wallet_address: &str,
-                                  keystore_path: &str, debug: bool) -> Ava {
-   Ava { address: s(wallet_address),
+pub fn mk_connection_to_binance(registry: TokenRegistry, wallet_address: &str,
+                                keystore_path: &str, debug: bool) -> Bsc {
+   Bsc { address: s(wallet_address),
          keystore_path: s(keystore_path),
          tokens: registry,
          debug }
@@ -71,22 +70,22 @@ mod functional_tests {
    use paste::paste;
    use book::{ create_testing, utils::now };
 
-   create_testing!("wallets::avalanche");
+   create_testing!("wallets::binance");
 
-   run!("connect_to_avalanche", {
-      let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
-      println!("My Avalanche wallet is\n{wallet:?}");
+   run!("connect_to_binance", {
+      let wallet = now(connect_to_binance("0x123", "xyz", true))?;
+      println!("My Binance wallet is\n{wallet:?}");
    });
 
-   run!("btc_quote", {
-      let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
-      let btc = now(wallet.quote("btc"))?;
-      println!("The quote for BTC is {btc}");
+   run!("eth_quote", {
+      let wallet = now(connect_to_binance("0x123", "xyz", true))?;
+      let eth = now(wallet.quote("eth"))?;
+      println!("The quote for ETH is {eth}");
    });
 
-   run!("avax_quote", {
-      let wallet = now(connect_to_avalanche("0x123", "xyz", true))?;
-      let avax = now(wallet.quote("avax"))?;
-      println!("The quote for AVAX is {avax}");
+   run!("bnb_quote", {
+      let wallet = now(connect_to_binance("0x123", "xyz", true))?;
+      let bnb = now(wallet.quote("bnb"))?;
+      println!("The quote for BNB is {bnb}");
    });
 }

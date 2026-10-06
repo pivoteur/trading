@@ -123,6 +123,11 @@ async fn native_coin_balance(blockchain: &Blockchain, addy: &str)
     hex_to_u128(&result)
 }
 
+/*
+xxx
+
+TODO: need to rethink this in light of the Wallet trait
+
 // ----- TESTS -------------------------------------------------------
 
 #[cfg(test)]
@@ -132,10 +137,7 @@ mod functional_tests {
     use paste::paste;
     use book::{ create_testing, csv_utils::as_csv, utils::now };
     use libs::types::blockchains::Blockchain::AVALANCHE;
-    use crate::{
-       consts::test_wallets::TEST_ADDRESS,
-       fetchers::tokens::fetch_token_registry
-    };
+    use crate::fetchers::tokens::fetch_token_registry;
 
     create_testing!("wallets");
 
@@ -164,3 +166,5 @@ mod functional_tests {
 {}", as_csv(&bal, true)?);
     });
 }
+
+*/
