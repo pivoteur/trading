@@ -22,6 +22,7 @@ gelic 0x123abc69 --blockchain binance
 
 ## Revisions
 
+* 1.3.0, 2026-10-07: simplified balances to `Assets`
 * 1.2.0, 1.2.1, 1.2.2, 2026-10-05: transitioned to a `Wallet` trait 
 implementation; defaulted `Wallet` traits; Boxed dynamic wallets
 * 1.1.4, 2026-09-20: returns USDC price as $1.00 (instead of erroring out)
