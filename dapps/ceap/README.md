@@ -40,6 +40,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
+* 1.2.0, 2026-10-08: shift to `Wallet` implementation; make DRY_RUN enum
 * 1.1.5, 2026-09-21: externalized token-registry
 * 1.1.4, 2026-09-20: reduced trade amounts to f32-size
 * 1.1.3, 2026-09-18: directory-restructuring

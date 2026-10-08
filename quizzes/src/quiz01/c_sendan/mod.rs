@@ -8,8 +8,8 @@ use book::{
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
-   types::wallets::Wallet,
-   wallets::{ factory::connect_wallet, mock::mock_connection }
+   types::{ modes::execution::{ Execution, Execution::LIVE }, wallets::Wallet },
+   wallets::factory::mk_connector
 };
 
 //======================================================
@@ -20,7 +20,7 @@ use trading::{
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.2.0")]
+#[command(name = "sendan", version = "1.2.1")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -46,8 +46,8 @@ struct Args {
     keystore_path: String,
 
     /// Simulate the send without broadcasting a transaction
-    #[arg(long, default_value_t = false)]
-    dry_run: bool,
+    #[arg(long, default_value_t = LIVE)]
+    dry_run: Execution,
 
     /// Print verbose debug logging
     #[arg(short = 'd', long, default_value_t = true)]
@@ -64,12 +64,9 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let to = &args.to_address;
     let chain = &args.blockchain;
     let debug = args.debug;
-    let wallet = if args.dry_run {
-       mock_connection(chain, debug)
-    } else {
-       connect_wallet(chain, &args.wallet_address,
-                      &args.keystore_path, debug).await?
-    };
+    let wallet =
+       mk_connector(&args.dry_run)(chain, &args.wallet_address,
+                                   &args.keystore_path, debug).await?;
     runoff_continuation(&wallet, amount, &args.token, to).await
 }
 
@@ -97,12 +94,13 @@ mod functional_tests {
       blockchains::Blockchain::AVALANCHE,
       measurable::Measurable
    };
-   use trading::consts::UNDEAD;
+   use trading::{ consts::UNDEAD, types::modes::execution::Execution::DRYRUN };
 
    create_testing!("quiz01::c_sendan");
 
    run!("sendan", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet =
+         now(mk_connector(&DRYRUN)(&AVALANCHE, "0x123", "xyz", true))?;
       let yday = &yesterday();
       let balances = now(wallet.balances(yday))?;
       let undead = balances.asset((AVALANCHE, UNDEAD));

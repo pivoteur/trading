@@ -24,7 +24,11 @@ use super::{
    consts::DUST_EPSILON,
    hex::pad_address_for_call,
    fetchers::wallets::fetch_token_balance,
-   types::{ rest::kyber::KyberSwap, tokens::TokenRegistry }
+   types::{
+      modes::execution::{ Execution, Execution::DRYRUN },
+      rest::kyber::KyberSwap,
+      tokens::TokenRegistry
+   }
 };
 
 //============================================================================
@@ -360,7 +364,7 @@ fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
 pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
      addy: &str, registry: &TokenRegistry, from: &str, to: &str, amount: f32,
      min_floor: f32, slippage_bps: u16, keystore_path: &str,
-     dry_run: bool, debug: bool) -> ErrStr<AttemptOutcome> {
+     mode: &Execution, debug: bool) -> ErrStr<AttemptOutcome> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     let swap = query_swap(blockchain, registry, from, to, amount, debug).await?;
     if swap.amount_out <= guaranteed_floor {
@@ -368,7 +372,7 @@ pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
                                min_floor, debug);
         Ok(AttemptOutcome::NotCleared)
     } else {
-        if dry_run {
+        if mode == &DRYRUN {
            debug_trade_result(None, "DRY-RUN WOULD CLEAR", from, to, amount,
                               &swap, min_floor, debug);
            Ok(AttemptOutcome::DryRunWouldClear {

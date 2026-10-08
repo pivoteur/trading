@@ -8,6 +8,7 @@ use crate::{
    fetchers::tokens::fetch_token_registry,
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
+      modes::execution::{ Execution, Execution::DRYRUN },
       tokens::TokenRegistry,
       wallets::Wallet
    }
@@ -16,8 +17,7 @@ use crate::{
 use book::{
    not_implemented,
    currency::usd::{ USD, mk_usd },
-   err_utils::ErrStr,
-   string_utils::s
+   err_utils::ErrStr
 };
 
 use libs::{
@@ -57,7 +57,7 @@ impl Wallet for MockWallet {
    fn token_registry(&self) -> &TokenRegistry {
       not_implemented!("token_registry")
    }
-   fn mode(&self) -> String { s("DRY-RUN") }
+   fn mode(&self) -> Execution { DRYRUN }
    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
       // You can use the concrete type's format logic here
       write!(f, "{:?}", self)

@@ -3,7 +3,10 @@ use clap::Parser;
 use trading::{
    auto_trading::attempt_trade_with_actual_amount,
    fetchers::tokens::fetch_token_registry,
-   types::tokens::TokenRegistry
+   types::{
+      modes::execution::{ Execution, Execution::LIVE },
+      tokens::TokenRegistry
+   }
 };
 use book::{
    parse_args_add_banner,
@@ -17,9 +20,10 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //=================================================================
 // ----- CLI -----------------------------------------------------
 //===============================================================
+
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.1.5")]
+#[command(version = "1.2.0")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -50,9 +54,9 @@ struct Args {
     #[arg(long, default_value_t = AVALANCHE)]
     blockchain: Blockchain,
 
-    /// Force a dry run even if --live is also passed.
-    #[arg(long)]
-    dry_run: bool,
+    /// Force a dry run
+    #[arg(long, default_value_t = LIVE)]
+    dry_run: Execution,
 
     /// Show debugging information
     #[arg(short, long)]
@@ -69,14 +73,14 @@ pub async fn runoff_with_args() -> ErrStr<()> {
                         &args.keystore_path, &registry,
                         &args.from_token, &args.to_token, amount,
                         floor, args.slippage_bps,
-                        args.dry_run, args.debug).await
+                        &args.dry_run, args.debug).await
 }
 
 async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
                              keystore_path: &str, registry: &TokenRegistry,
                              from: &str, to: &str,
                              amount: f32, floor: f32, slippage: u16,
-                             dry_run: bool, debug: bool) -> ErrStr<()> {
+                             dry_run: &Execution, debug: bool) -> ErrStr<()> {
     let ans =
         attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
                                          amount, floor, slippage, keystore_path,
@@ -91,16 +95,17 @@ async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
 #[cfg(not(tarpaulin_include))]
 #[cfg(test)]
 pub mod functional_test {
-    use super::*;
-    use paste::paste;
-    use book::{ create_testing, utils::now };
+   use super::*;
+   use paste::paste;
+   use book::{ create_testing, utils::now };
+   use trading::types::modes::execution::Execution::DRYRUN;
 
-    create_testing!("quiz01::d_ceap");
+   create_testing!("quiz01::d_ceap");
 
-    run!("ceap", {
-        let ava = &AVALANCHE;
-        let registry = now(fetch_token_registry(ava))?;
-        now(runoff_continuation(ava, "0x123", "xyz", &registry,
-                                "BTC", "ETH", 1.0, 16.0, 200, true, true))?;
-    });
+   run!("ceap", {
+      let ava = &AVALANCHE;
+      let registry = now(fetch_token_registry(ava))?;
+      now(runoff_continuation(ava, "0x123", "xyz", &registry,
+                              "BTC", "ETH", 1.0, 16.0, 200, &DRYRUN, true))?;
+   });
 }
