@@ -1,6 +1,5 @@
 use clap::Parser;
 use book::{
-   debug,
    parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
@@ -8,7 +7,10 @@ use book::{
    string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
-use trading::{ wallets::factory::connect_wallet, types::Wallet };
+use trading::{
+   types::wallets::Wallet,
+   wallets::{ factory::connect_wallet, mock::mock_connection }
+};
 
 //======================================================
 // ----- CLI -------------------------------------------
@@ -61,8 +63,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let amount: f32 = args.amount.into();
     let to = &args.to_address;
     let chain = &args.blockchain;
-    let debug = &args.debug;
-    let wallet = if &args.dry_run {
+    let debug = args.debug;
+    let wallet = if args.dry_run {
        mock_connection(chain, debug)
     } else {
        connect_wallet(chain, &args.wallet_address,
@@ -71,7 +73,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     runoff_continuation(&wallet, amount, &args.token, to).await
 }
 
-async fn runoff_continuation(wallet: &dyn Wallet, amount: f32, token: &str,
+async fn runoff_continuation(wallet: &Box<dyn Wallet>, amount: f32, token: &str,
                              to: &str) -> ErrStr<()> {
    wallet.send(token, to, amount).await
 }
@@ -83,27 +85,33 @@ async fn runoff_continuation(wallet: &dyn Wallet, amount: f32, token: &str,
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 mod functional_tests {
-    use super::*;
-    use paste::paste;
-    use book::{ create_testing, utils::now };
-    use libs::types::blockchains::Blockchain::AVALANCHE;
-    use trading::{
-       consts::UNDEAD,
-       wallets::mock::mock_connection
-    };
+   use super::*;
+   use paste::paste;
+   use book::{
+      create_testing,
+      date_utils::yesterday,
+      string_utils::s,
+      utils::now
+   };
+   use libs::types::{
+      blockchains::Blockchain::AVALANCHE,
+      measurable::Measurable
+   };
+   use trading::consts::UNDEAD;
 
-    create_testing!("quiz01::c_sendan");
+   create_testing!("quiz01::c_sendan");
 
-    run!("sendan", {
-        let wallet = mock_connection(&AVALANCHE, true);
-        let balances = wallet.balances();
-           now(fetch_token_balance(&AVALANCHE, TEST_ADDRESS, UNDEAD, 
-                                   &registry, true))?;
-        let balance = balance0.unwrap_or(0.0);
-        println!("\ttest wallet UNDEAD balance: {balance:.0}");
-        let amount = balance / 2.0;
-        now(runoff_continuation(&AVALANCHE, &registry, amount, UNDEAD,
-                "0x000000000000000000000000000000000000AB",
-                TEST_ADDRESS, "xyz", true, true))?;
-    });
+   run!("sendan", {
+      let wallet = mock_connection(&AVALANCHE, true);
+      let yday = &yesterday();
+      let balances = now(wallet.balances(yday))?;
+      let undead = balances.asset((AVALANCHE, UNDEAD));
+      undead.ok_or(s("No UNDEAD in wallet"))
+            .and_then(|asset| {
+         let balance = asset.sz();
+         println!("\ttest wallet UNDEAD balance: {balance:.0}");
+         let amount = balance / 2.0;
+         now(runoff_continuation(&wallet, amount, UNDEAD, "0x123"))
+      })?;
+   });
 }

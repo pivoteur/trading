@@ -52,7 +52,7 @@ impl Wallet for MockWallet {
    }
    fn blockchain(&self) -> &Blockchain { &self.blockchain }
    fn keystore_path(&self) -> &str { not_implemented!("keystore_path") }
-   fn wallet_address(&self) -> &str { not_implemented!("wallet_address") }
+   fn wallet_address(&self) -> &str { "0xmock_address" }
    fn debug(&self) -> bool { true }
    fn token_registry(&self) -> &TokenRegistry {
       not_implemented!("token_registry")
