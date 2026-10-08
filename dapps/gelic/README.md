@@ -22,6 +22,7 @@ gelic 0x123abc69 --blockchain binance
 
 ## Revisions
 
+* 1.3.1, 2026-10-08: annotated `date` argument
 * 1.3.0, 2026-10-07: simplified balances to `Assets`
 * 1.2.0, 1.2.1, 1.2.2, 2026-10-05: transitioned to a `Wallet` trait 
 implementation; defaulted `Wallet` traits; Boxed dynamic wallets
