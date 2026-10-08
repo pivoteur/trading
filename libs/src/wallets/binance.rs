@@ -6,7 +6,7 @@ use crate::{
    types::{ tokens::TokenRegistry, wallets::Wallet }
 };
 
-use book::{ not_implemented, err_utils::ErrStr, string_utils::s };
+use book::{ err_utils::ErrStr, string_utils::s };
 use libs::types::blockchains::{ Blockchain, Blockchain::BINANCE };
 
 pub struct Bsc {
@@ -29,22 +29,15 @@ impl fmt::Debug for Bsc {
 
 #[async_trait(?Send)]
 impl Wallet for Bsc {
-   async fn send(&self) -> ErrStr<()> {
-      let keystore = &self.keystore_path;
-      not_implemented!("send", keystore)
-   }
-   async fn trade(&self) -> ErrStr<()> {
-      not_implemented!("trade")
-   }
    fn blockchain(&self) -> &Blockchain { &BINANCE }
    fn debug(&self) -> bool { self.debug }
    fn keystore_path(&self) -> &str { &self.keystore_path }
    fn token_registry(&self) -> &TokenRegistry { &self.tokens }
    fn wallet_address(&self) -> &str { &self.address }
-    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // You can use the concrete type's format logic here
-        write!(f, "{:?}", self)
-    }
+   fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      // You can use the concrete type's format logic here
+      write!(f, "{:?}", self)
+   }
 }
 
 pub async fn connect_to_binance(wallet_address: &str, keystore_path: &str,

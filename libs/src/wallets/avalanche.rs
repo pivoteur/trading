@@ -6,7 +6,7 @@ use crate::{
    types::{ tokens::TokenRegistry, wallets::Wallet }
 };
 
-use book::{ not_implemented, err_utils::ErrStr, string_utils::s };
+use book::{ err_utils::ErrStr, string_utils::s };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 
 pub struct Ava {
@@ -29,13 +29,6 @@ impl fmt::Debug for Ava {
 
 #[async_trait(?Send)]
 impl Wallet for Ava {
-   async fn send(&self) -> ErrStr<()> {
-      let keystore = &self.keystore_path;
-      not_implemented!("send", keystore)
-   }
-   async fn trade(&self) -> ErrStr<()> {
-      not_implemented!("trade")
-   }
    fn blockchain(&self) -> &Blockchain { &AVALANCHE }
    fn debug(&self) -> bool { self.debug }
    fn keystore_path(&self) -> &str { &self.keystore_path }

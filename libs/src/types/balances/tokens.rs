@@ -3,7 +3,10 @@ use serde::Serialize;
 use serde_with::{ serde_as, DisplayFromStr };
 
 use book::{ currency::usd::{ USD, mk_usd }, string_utils::s };
-use libs::types::{ blockchains::Blockchain, tokens::coins::{ Coin, mk_coin } };
+use libs::{
+   collections::assets::{ Assets, from_coins },
+   types::{ blockchains::Blockchain, tokens::coins::{ Coin, mk_coin } }
+};
 
 // ----- TokenBalance -------------------------------------------------------
 
@@ -28,4 +31,11 @@ impl TokenBalance {
       mk_coin(&(blockchain.clone(), self.token.clone()),
               self.amount, &self.quote, date)
    }
+}
+
+pub fn as_assets(balances: &[TokenBalance], blockchain: &Blockchain,
+                 date: &NaiveDate) -> Assets {
+   let coins: Vec<Coin> =
+      balances.iter().map(|bal| bal.as_coin(blockchain, date)).collect();
+   from_coins(&coins)
 }

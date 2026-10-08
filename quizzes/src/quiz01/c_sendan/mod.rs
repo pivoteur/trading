@@ -1,6 +1,6 @@
 use clap::Parser;
 use book::{
-   debug, parse_args_add_banner,
+   parse_args_add_banner,
    cli_utils::generate_banner,
    err_utils::ErrStr,
    num::floats::comma_floats::CommaFloat,
@@ -8,9 +8,8 @@ use book::{
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
-   auto_trading::send_tokens_to_address,
-   fetchers::tokens::fetch_token_registry,
-   types::tokens::TokenRegistry
+   types::wallets::Wallet,
+   wallets::{ factory::connect_wallet, mock::mock_connection }
 };
 
 //======================================================
@@ -21,7 +20,7 @@ use trading::{
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.1.4")]
+#[command(name = "sendan", version = "1.2.0")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -64,29 +63,19 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let amount: f32 = args.amount.into();
     let to = &args.to_address;
     let chain = &args.blockchain;
-    let registry = fetch_token_registry(chain).await?;
-    runoff_continuation(chain, &registry, amount, &args.token, to,
-                        &args.wallet_address, &args.keystore_path,
-                        args.dry_run, args.debug).await
+    let debug = args.debug;
+    let wallet = if args.dry_run {
+       mock_connection(chain, debug)
+    } else {
+       connect_wallet(chain, &args.wallet_address,
+                      &args.keystore_path, debug).await?
+    };
+    runoff_continuation(&wallet, amount, &args.token, to).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain, registry: &TokenRegistry,
-                             amount: f32, token: &str, to: &str, addy: &str,
-                             keystore_path: &str, dry_run: bool, debug: bool)
-      -> ErrStr<()> {
-    debug!("runoff_continuation", debug);
-    let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
-    let log_line = format!("{mode} send {amount:.8} {token} -> {to}");
-    log!("mode {}", log_line);
-
-    log!("wallet {}", addy);
-
-    if !dry_run {
-       let _ =
-          send_tokens_to_address(blockchain, addy, &registry, token, to, amount,
-                                 keystore_path, debug).await?;
-    }
-    Ok(())
+async fn runoff_continuation(wallet: &Box<dyn Wallet>, amount: f32, token: &str,
+                             to: &str) -> ErrStr<()> {
+   wallet.send(token, to, amount).await
 }
 
 // =======================================================
@@ -96,27 +85,33 @@ async fn runoff_continuation(blockchain: &Blockchain, registry: &TokenRegistry,
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 mod functional_tests {
-    use super::*;
-    use paste::paste;
-    use book::{ create_testing, utils::now };
-    use libs::types::blockchains::Blockchain::AVALANCHE;
-    use trading::{
-       consts::UNDEAD,
-       fetchers::wallets::fetch_token_balance
-    };
+   use super::*;
+   use paste::paste;
+   use book::{
+      create_testing,
+      date_utils::yesterday,
+      string_utils::s,
+      utils::now
+   };
+   use libs::types::{
+      blockchains::Blockchain::AVALANCHE,
+      measurable::Measurable
+   };
+   use trading::consts::UNDEAD;
 
-    create_testing!("quiz01::c_sendan");
+   create_testing!("quiz01::c_sendan");
 
-    run!("sendan", {
-        let registry = now(fetch_token_registry(&AVALANCHE))?;
-        let balance0 =
-           now(fetch_token_balance(&AVALANCHE, TEST_ADDRESS, UNDEAD, 
-                                   &registry, true))?;
-        let balance = balance0.unwrap_or(0.0);
-        println!("\ttest wallet UNDEAD balance: {balance:.0}");
-        let amount = balance / 2.0;
-        now(runoff_continuation(&AVALANCHE, &registry, amount, UNDEAD,
-                "0x000000000000000000000000000000000000AB",
-                TEST_ADDRESS, "xyz", true, true))?;
-    });
+   run!("sendan", {
+      let wallet = mock_connection(&AVALANCHE, true);
+      let yday = &yesterday();
+      let balances = now(wallet.balances(yday))?;
+      let undead = balances.asset((AVALANCHE, UNDEAD));
+      undead.ok_or(s("No UNDEAD in wallet"))
+            .and_then(|asset| {
+         let balance = asset.sz();
+         println!("\ttest wallet UNDEAD balance: {balance:.0}");
+         let amount = balance / 2.0;
+         now(runoff_continuation(&wallet, amount, UNDEAD, "0x123"))
+      })?;
+   });
 }

@@ -54,22 +54,15 @@ where:
 ## State
 
 No pivots, no persisted position -- each run either sends or errors, and
-that's the whole story. Every send attempt (real or dry-run) still writes a
-row to `sendan-sends.log` for an audit trail. Log lines start with a raw
-Unix timestamp; to read one:
+that's the whole story.
 
-`$ date -d @1785876760`
-
-converts it to your system's local time.
-
-A real (non-dry-run) send failure -- a reverted or dropped tx, a signer
-error -- writes an outcome of `FAILED: <reason>` rather than silently
-printing to a console that nobody's watching. A bad address or an
-insufficient balance is caught before anything is attempted and isn't
-logged at all, dry-run or not -- there was never a real send to record.
+A bad address or an insufficient balance is caught before anything is 
+attempted and isn't logged at all, dry-run or not -- there was never a real 
+send to record.
 
 ## Revisions
 
+* 1.2.0, 2026-10-07: switch to the `Wallet` trait
 * 1.1.4, 2026-09-21: pushed safety-checks (and their unit tests) to trading-libs
 * 1.1.3, 2026-09-20: DUST from library, amount now f32
 * 1.1.2, 2026-09-18: directory-restructuring
