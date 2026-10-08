@@ -40,7 +40,7 @@ pub trait Wallet: Sync {
       debug!("send", debug);
       let log_line =
          format!("{} send {amount:.8} {token} -> {to_address}",
-      self.mode());
+                 self.mode());
       log!("mode {}", log_line);
       log!("wallet {}", self.wallet_address());
       self.do_send(token, to_address, amount).await
