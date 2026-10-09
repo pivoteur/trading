@@ -33,6 +33,8 @@ jobs:
         with:
           path: trading
 
+#         repository: pivoteur/trading    # when in another repository
+
       - name: Load Shared Environment Variables
         uses: doughepi/yaml-env-action@v1.0.0
         with:
