@@ -79,7 +79,7 @@ jobs:
           repository: logicalgraphs/crypto-n-rust
           path: crypto-n-rust
 
-      - name: Setting date and URL
+      - name: Setting date
         run: |
           echo "LE_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
