@@ -15,7 +15,9 @@ use serde_json::{ Value, from_str, json };
 use book::{
    debug,
    currency::usd::{ USD, mk_usd },
-   err_utils::{ ErrStr, err_or }
+   err_utils::{ ErrStr, err_or },
+   string_utils::s,
+   utils::pred
 };
 use libs::types::{ blockchains::Blockchain, util::Id };
 
@@ -24,7 +26,7 @@ use super::{
    consts::DUST_EPSILON,
    hex::pad_address_for_call,
    fetchers::wallets::fetch_token_balance,
-   types::{ rest::kyber::KyberSwap, tokens::TokenRegistry }
+   types::{ rest::kyber::KyberSwap, tokens::{ TokenRegistry, TokenEntry } }
 };
 
 //============================================================================
@@ -607,25 +609,35 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
                                     symbol: &str, to_address: &str,
                                     amount: f32, keystore_path: &str,
                                     verbose: bool) -> ErrStr<(String, f32)> {
-    if amount <= DUST_EPSILON {
-        Err(format!("amount must be greater than {DUST_EPSILON}, got {amount}"))
-    } else {
-        send_tokens(blockchain, addy, registry, symbol, to_address, amount,
-                    keystore_path, verbose).await
-    }
+   check_eps(amount)?;
+   let token = fetch_entry(symbol, registry)?;
+   send_tokens(blockchain, addy, token, to_address, amount,
+               keystore_path, verbose).await
 }
 
-async fn send_tokens(blockchain: &Blockchain,
-                     addy: &str, registry: &TokenRegistry, symbol: &str,
-                     to_address: &str, amount: f32, keystore_path: &str,
-                     verbose: bool) -> ErrStr<(String, f32)> {
+fn check_eps(amount: f32) -> ErrStr<()> {
+   pred(amount > DUST_EPSILON, ())
+      .ok_or(format!("amount must be more than {DUST_EPSILON}, got {amount}"))
+}
+fn fetch_entry(symbol: &str, registry: &TokenRegistry)
+      -> ErrStr<(TokenEntry, String)> {
+   let entry = registry.token(symbol)?;
+   pred(!entry.native, ()).ok_or(s("Native token send not supported"))?;
+   let mb_addr = &entry.address;
+   let addr = mb_addr.clone().ok_or(format!("No address for {symbol}"))?;
+   Ok((entry, addr.to_string()))
+}
+
+async fn send_tokens(blockchain: &Blockchain, addy: &str,
+                     token: (TokenEntry, String), to_address: &str, amount: f32,
+                     keystore_path: &str, verbose: bool)
+       -> ErrStr<(String, f32)> {
     debug!("send_tokens", verbose);
+    let (entry, token_addr) = &token;
     let signer = load_signer(blockchain, addy, keystore_path).await?;
     let provider = err_or(Provider::<Http>::try_from(&blockchain.url()),
                           "Could not create RPC provider")?;
     let client = SignerMiddleware::new(provider, signer);
-    let entry = registry.token(symbol)?;
-    let token_addr = entry.address.ok_or(format!("No address for {symbol}"))?;
     let amount_base =
        (amount * 10f32.powi(entry.decimals as i32)).round() as u128;
 
@@ -840,4 +852,18 @@ raw number, no currency conversion");
         Ok(())
    }
 */
+   #[tokio::test] async fn fail_send_native_token() -> ErrStr<()> {
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let result =
+           send_tokens_to_address(&AVALANCHE, "0xabc", &registry, "avax",
+                   "0x123", 0.01, "xyz", true).await;
+        match result {
+           Ok(x) =>
+              Err(format!("Send is okay to send native token (AVAX) {x:?}")),
+           Err(err) => {
+              assert!(err.contains("Native"), "Failed for wrong error: {err}");
+              Ok(())
+           }
+        }
+   }
 }
