@@ -2,11 +2,11 @@ use std::str::FromStr;
 
 use ethers::{
    middleware::SignerMiddleware,
-   providers::{Http, Middleware, Provider},
-   signers::{LocalWallet, Signer},
+   providers::{ Http, Middleware, Provider },
+   signers::{ LocalWallet, Signer },
    types::{
-      transaction::eip2718::TypedTransaction,
-      Address, Bytes, Eip1559TransactionRequest, U256
+      Address, Bytes, H160, U256, Eip1559TransactionRequest,
+      transaction::eip2718::TypedTransaction
    }
 };
 use serde::Deserialize;
@@ -132,6 +132,7 @@ pub async fn query_swap(
 //============================================================================
 //----- Shared Pivot & Trade-Cycle Types ---------------------------------------
 //============================================================================
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpenPivot {
     pub pivot_id:      Id,
@@ -231,116 +232,6 @@ pub fn report_misfire(stage: MisfireStage, pivot_id: Option<Id>, from: &str, to:
     );
     println!("      likely cause: {why} -- {how}");
 }
-
-/*
-pub fn replay_log(path: &str) -> ErrStr<(Vec<OpenPivot>, Id, Id, CumulativeStats)> {
-    if !Path::new(path).exists() {
-        return Ok((Vec::new(), 1, 1, CumulativeStats::default()));
-    }
-
-    let lines = lines_from_file(path)?;
-
-    let mut open_by_id: HashMap<Id, OpenPivot> = HashMap::new();
-    let mut max_pivot_id: Id = 0;
-    let mut max_close_id: Id = 0;
-    let mut stats = CumulativeStats::default();
-
-    for (line_no, line) in lines.iter().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with("timestamp\t") {
-            continue; // blank, comment, or a header row
-        }
-        let fields: Vec<&str> = line.split('\t').collect();
-        let kind = *fields.get(1).unwrap_or(&"");
-
-        if kind == "CHECK" {
-            continue; // old-format tvá rows, tolerated but not counted
-        }
-
-        if fields.len() < 14 {
-            return Err(format!("malformed line at {path}:{}: too few columns: '{line}'", line_no + 1));
-        }
-        let ts: u64 = parse_log_ts(fields[0])
-            .map_err(|e| format!("{e} at {path}:{}: '{line}'", line_no + 1))?;
-        let pivot_id_field = fields[2];
-        let opened_pivot_id_field = fields[4];
-        let prim = fields[5];
-        let proper = fields[6];
-        let prim_amount: f64 = fields[7].parse()
-            .map_err(|_| format!("bad prim_amount at {path}:{}: '{line}'", line_no + 1))?;
-        let proper_amount: f64 = fields[8].parse()
-            .map_err(|_| format!("bad proper_amount at {path}:{}: '{line}'", line_no + 1))?;
-        let gas_avax: f64 = fields[12].parse()
-            .map_err(|_| format!("bad gas_avax at {path}:{}: '{line}'", line_no + 1))?;
-
-        match kind {
-            "OPEN" => {
-                if !opened_pivot_id_field.is_empty() {
-                    return Err(format!("OPEN at {path}:{} has a non-blank opened_pivot_id ('{opened_pivot_id_field}'): '{line}'", line_no + 1));
-                }
-                let pivot_id: Id = pivot_id_field.parse()
-                    .map_err(|_| format!("bad pivot_id at {path}:{}: '{line}'", line_no + 1))?;
-                max_pivot_id = max_pivot_id.max(pivot_id);
-                stats.total_opens += 1;
-                stats.total_gas_avax += gas_avax;
-                open_by_id.insert(pivot_id, OpenPivot {
-                    pivot_id, opened_at: ts,
-                    prim: prim.to_string(), prim_amount,
-                    proper: proper.to_string(), proper_amount,
-                });
-            }
-            "CLOSE" => {
-                if !pivot_id_field.is_empty() {
-                    return Err(format!("CLOSE at {path}:{} has a non-blank pivot_id ('{pivot_id_field}') — closes don't open a pivot, use opened_pivot_id: '{line}'", line_no + 1));
-                }
-                let close_id: Id = fields[3].parse()
-                    .map_err(|_| format!("bad close_id at {path}:{}: '{line}'", line_no + 1))?;
-                let opened_pivot_id: Id = opened_pivot_id_field.parse()
-                    .map_err(|_| format!("bad opened_pivot_id at {path}:{}: '{line}'", line_no + 1))?;
-                let gain: f64 = fields[9].parse()
-                    .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;
-                let roi: f64 = fields[10].parse()
-                    .map_err(|_| format!("bad roi at {path}:{}: '{line}'", line_no + 1))?;
-                let apr: f64 = fields[11].parse()
-                    .map_err(|_| format!("bad apr at {path}:{}: '{line}'", line_no + 1))?;
-
-                let closed_pivot = open_by_id.remove(&opened_pivot_id)
-                    .ok_or_else(|| format!("CLOSE at {path}:{} references pivot #{opened_pivot_id}, which has no matching OPEN before it", line_no + 1))?;
-
-                max_close_id = max_close_id.max(close_id);
-                stats.total_closes += 1;
-                stats.total_gas_avax += gas_avax;
-                stats.roi_sum += roi;
-                stats.apr_sum += apr;
-                if closed_pivot.prim == UNDEAD {
-                    stats.total_gain_undead += gain;
-                } else {
-                    stats.total_gain_asset += gain;
-                }
-            }
-            "MISFIRE" => {
-                if !pivot_id_field.is_empty() || !opened_pivot_id_field.is_empty() {
-                    return Err(format!("MISFIRE at {path}:{} must leave pivot_id and opened_pivot_id blank: '{line}'", line_no + 1));
-                }
-                stats.total_gas_avax += gas_avax;
-                if !fields[9].is_empty() {
-                    let gain: f64 = fields[9].parse()
-                        .map_err(|_| format!("bad gain at {path}:{}: '{line}'", line_no + 1))?;
-                    if prim == UNDEAD {
-                        stats.total_gain_undead += gain;
-                    } else {
-                        stats.total_gain_asset += gain;
-                    }
-                }
-            }
-            other => return Err(format!("unrecognized log line type '{other}' at {path}:{}: '{line}'", line_no + 1)),
-        }
-    }
-
-    let still_open: Vec<OpenPivot> = open_by_id.into_values().collect();
-    Ok((still_open, max_pivot_id + 1, max_close_id + 1, stats))
-}
-*/
 
 //============================================================================
 //----- Shared Trade-Attempt Helper --------------------------------------------
@@ -457,7 +348,8 @@ address ({expected_address}) — refusing to proceed. No funds moved."
 /// re-estimated fresh on every call rather than reused across steps.
 async fn build_tx_with_fee_buffer(
         client: &SignerMiddleware<Provider<Http>, LocalWallet>, to: Address,
-        data: Bytes) -> ErrStr<Eip1559TransactionRequest> {
+        data: Bytes, mb_value: Option<U256>)
+       -> ErrStr<Eip1559TransactionRequest> {
     let (max_fee, max_priority_fee) =
        err_or(client.estimate_eip1559_fees(None).await,
               "Could not estimate EIP-1559 fees")?;
@@ -465,11 +357,14 @@ async fn build_tx_with_fee_buffer(
     // and submission without overpaying on the priority fee.
     let buffered_max_fee =
        max_fee.saturating_mul(U256::from(130)) / U256::from(100);
-    let tx = Eip1559TransactionRequest::new()
+    let mut tx = Eip1559TransactionRequest::new()
         .to(to)
         .data(data)
         .max_fee_per_gas(buffered_max_fee)
         .max_priority_fee_per_gas(max_priority_fee);
+    if let Some(value) = mb_value {
+       tx = tx.value(value);
+    }
 
     let typed: TypedTransaction = tx.clone().into();
     let gas_estimate = err_or(client.estimate_gas(&typed, None).await,
@@ -480,7 +375,6 @@ async fn build_tx_with_fee_buffer(
     Ok(tx.gas(buffered_gas))
 }
 
-/// Approves the router for EXACTLY this trade's amount — never a standing
 /// allowance. The router can never pull more than what's approved here.
 pub async fn approve_exact_amount(
         client: &SignerMiddleware<Provider<Http>, LocalWallet>,
@@ -497,7 +391,7 @@ pub async fn approve_exact_amount(
     );
     let to = err_or(Address::from_str(token_contract), "Bad token address")?;
     let data = err_or(Bytes::from_str(&data_hex), "Bad approve calldata")?;
-    let tx = build_tx_with_fee_buffer(client, to, data).await?;
+    let tx = build_tx_with_fee_buffer(client, to, data, None).await?;
     let (_tx, gas) =
        complete_transaction(client, tx, "approve", false, verbose).await?;
     Ok(gas)
@@ -564,7 +458,7 @@ pub async fn send_swap_tx(
     let to = err_or(Address::from_str(router), "Bad router address")?;
     let data =
          err_or(Bytes::from_str(calldata_hex), "Bad calldata from KyberSwap")?;
-    let tx = build_tx_with_fee_buffer(client, to, data).await?;
+    let tx = build_tx_with_fee_buffer(client, to, data, None).await?;
     complete_transaction(client, tx, "swap", true, verbose).await
 }
 
@@ -609,49 +503,72 @@ pub async fn send_tokens_to_address(blockchain: &Blockchain,
                                     symbol: &str, to_address: &str,
                                     amount: f32, keystore_path: &str,
                                     verbose: bool) -> ErrStr<(String, f32)> {
+   debug!("send_token_to_address", verbose);
    check_eps(amount)?;
-   let token = fetch_entry(symbol, registry)?;
-   send_tokens(blockchain, addy, token, to_address, amount,
-               keystore_path, verbose).await
+   let signer = load_signer(blockchain, addy, keystore_path).await?;
+   let provider = err_or(Provider::<Http>::try_from(&blockchain.url()),
+                         "Could not create RPC provider")?;
+   let client = SignerMiddleware::new(provider, signer);
+   let (entry, mb_token_addr) = check_registry(symbol, registry)?;
+   let amount_base =
+       (amount * 10f32.powi(entry.decimals as i32)).round() as u128;
+   let (to, data, value) = if entry.native {
+      build_send_native(to_address, amount_base, verbose)
+         .and_then(|(a,b,c)| Ok((a, b, Some(c))))?
+   } else {
+      build_send_erc20(mb_token_addr, to_address, amount_base, verbose)
+         .and_then(|(a,b)| Ok((a, b, None)))?
+   };
+   log!("Parameters for sending: ({})",
+        format!("{}, {}, {:?}", to, data, value));
+
+   // Update your builder function to accept the optional 'value' field. If
+   // your existing function can't be modified, see the adjustment note below.
+   let tx = build_tx_with_fee_buffer(&client, to, data, value).await?;
+
+   log!("On its way — courier's en route...");
+   complete_transaction(&client, tx, "transfer", true, verbose).await
 }
 
 fn check_eps(amount: f32) -> ErrStr<()> {
    pred(amount > DUST_EPSILON, ())
       .ok_or(format!("amount must be more than {DUST_EPSILON}, got {amount}"))
 }
-fn fetch_entry(symbol: &str, registry: &TokenRegistry)
-      -> ErrStr<(TokenEntry, String)> {
+
+fn check_registry(symbol: &str, registry: &TokenRegistry)
+      -> ErrStr<(TokenEntry, Option<String>)> {
    let entry = registry.token(symbol)?;
-   pred(!entry.native, ()).ok_or(s("Native token send not supported"))?;
-   let mb_addr = &entry.address;
-   let addr = mb_addr.clone().ok_or(format!("No address for {symbol}"))?;
-   Ok((entry, addr.to_string()))
+   let mb_addr = &entry.address.clone();
+   Ok((entry, mb_addr.clone()))
 }
 
-async fn send_tokens(blockchain: &Blockchain, addy: &str,
-                     token: (TokenEntry, String), to_address: &str, amount: f32,
-                     keystore_path: &str, verbose: bool)
-       -> ErrStr<(String, f32)> {
-    debug!("send_tokens", verbose);
-    let (entry, token_addr) = &token;
-    let signer = load_signer(blockchain, addy, keystore_path).await?;
-    let provider = err_or(Provider::<Http>::try_from(&blockchain.url()),
-                          "Could not create RPC provider")?;
-    let client = SignerMiddleware::new(provider, signer);
-    let amount_base =
-       (amount * 10f32.powi(entry.decimals as i32)).round() as u128;
+fn build_send_native(to_address: &str, amount_base: u128, verbose: bool)
+      -> ErrStr<(H160, Bytes, U256)> {
+   debug!("build_send_native", verbose);
+   log!("branch");
+   // Native Transfer: Target is the actual recipient, payload is empty,
+   // value holds the amount
+   let to = err_or(Address::from_str(to_address), "Bad recipient address")?;
+   let data = Bytes::new(); // Empty calldata
+   let value = U256::from(amount_base);
+   Ok((to, data, value))
+}
 
-    // transfer(address,uint256) selector = 0xa9059cbb
-    let data_hex = format!(
-        "0xa9059cbb{}{}",
-        pad_address_for_call(to_address),
-        pad_u256_for_call(amount_base)
-    );
-    let to = err_or(Address::from_str(&token_addr), "Bad token address")?;
-    let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
-    let tx = build_tx_with_fee_buffer(&client, to, data).await?;
-    log!("On its way — courier's en route...");
-    complete_transaction(&client, tx, "transfer", true, verbose).await
+fn build_send_erc20(mb_token_addr: Option<String>, to_address: &str,
+                    amount_base: u128, verbose: bool) -> ErrStr<(H160, Bytes)> {
+   debug!("build_send_erc20", verbose);
+   log!("branch");
+   let token_addr = mb_token_addr.ok_or(s("No token address"))?;
+
+   // ERC-20 Transfer: Target is the token contract, payload contains 
+   // encoded call, value is 0
+   let data_hex =
+      format!("0xa9059cbb{}{}",
+              pad_address_for_call(to_address),
+              pad_u256_for_call(amount_base));
+   let to = err_or(Address::from_str(&token_addr), "Bad token address")?;
+   let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
+   Ok((to, data))
 }
 
 pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
@@ -667,7 +584,6 @@ pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
     let ratio = fresh_quote.amount_out;
     let trade = format!("{amount:.6} {from} -> {:.8} {to}", ratio);
     log!("Fresh quote: {}", trade);
-
     // See slippage_adjusted_floor: the swap below is authorized (via
     // slippage_bps) to settle as low as fresh_quote * (1 - slippage_bps),
     // so the fresh quote itself must clear that worse case, not just
@@ -851,8 +767,12 @@ raw number, no currency conversion");
         
         Ok(())
    }
-*/
+
+// I need to find a way to test sending native tokens using mocks
    #[tokio::test] async fn fail_send_native_token() -> ErrStr<()> {
+
+        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
+
         let registry = fetch_token_registry(&AVALANCHE).await?;
         let result =
            send_tokens_to_address(&AVALANCHE, "0xabc", &registry, "avax",
@@ -866,4 +786,5 @@ raw number, no currency conversion");
            }
         }
    }
+*/
 }

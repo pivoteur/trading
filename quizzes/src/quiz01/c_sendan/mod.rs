@@ -20,7 +20,7 @@ use trading::{
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.2.1")]
+#[command(name = "sendan", version = "1.3.0")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -89,6 +89,7 @@ mod functional_tests {
    use paste::paste;
    use book::{
       create_testing,
+      async_utils::AsyncTryExt,
       date_utils::yesterday,
       string_utils::s,
       utils::now
@@ -101,17 +102,19 @@ mod functional_tests {
 
    create_testing!("quiz01::c_sendan");
 
-   run!("sendan", {
+   async fn sender(symbol: &str) -> ErrStr<()> {
       let wallet = mock_connection(&AVALANCHE, true);
       let yday = &yesterday();
-      let balances = now(wallet.balances(yday))?;
-      let undead = balances.asset((AVALANCHE, UNDEAD));
-      undead.ok_or(s("No UNDEAD in wallet"))
-            .and_then(|asset| {
+      let balances = wallet.balances(yday).await?;
+      let token = balances.asset((AVALANCHE, symbol));
+      token.ok_or(format!("No {symbol} in wallet"))
+           .async_and_then(async |asset| {
          let balance = asset.sz();
-         println!("\ttest wallet UNDEAD balance: {balance:.0}");
+         println!("\ttest wallet {symbol} balance: {balance:.2}");
          let amount = balance / 2.0;
-         now(runoff_continuation(&wallet, amount, UNDEAD, "0x123"))
-      })?;
-   });
+         runoff_continuation(&wallet, amount, symbol, "0x123").await
+      }).await
+   }
+   run!("send_undead", now(sender("undead"))?);
+   run!("send_avax", now(sender("avax"))?);
 }

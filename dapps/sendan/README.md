@@ -62,6 +62,7 @@ send to record.
 
 ## Revisions
 
+* 1.3.0, 2026-10-10: sending native tokens now
 * 1.2.1, 2026-10-08: fast-fail on trying to send native tokens (e.g. AVAX),
 (until I implement that functionality)
 * 1.2.0, 2026-10-07: switch to the `Wallet` trait
