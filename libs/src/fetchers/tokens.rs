@@ -33,7 +33,7 @@ mod functional_tests {
    use paste::paste;
    use book::{ create_testing, csv_utils::print_csv, utils::now };
    use libs::types::blockchains::Blockchain::*;
-   use crate::auto_trading::query_swap;
+   use crate::implementation::transactions::quotes::query_swap;
 
    create_testing!("libs::tokens");
 
