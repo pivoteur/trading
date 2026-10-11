@@ -29,6 +29,7 @@ use super::{
    types::{ rest::kyber::KyberSwap, tokens::{ TokenRegistry, TokenEntry } }
 };
 
+/*
 //============================================================================
 //----- Live KyberSwap Quote --------------------------------------------------
 //============================================================================
@@ -128,6 +129,7 @@ pub async fn query_swap(
         router_address: dat.router_address 
     })
 }
+*/
 
 //============================================================================
 //----- Shared Pivot & Trade-Cycle Types ---------------------------------------
@@ -320,6 +322,7 @@ fn gas_cost_avax(gas_used: Option<U256>, gas_price: Option<U256>) -> f32 {
     }
 }
 
+/*
 pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
                          keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
@@ -341,6 +344,7 @@ address ({expected_address}) — refusing to proceed. No funds moved."
        Ok(wallet)
     }
 }
+*/
 
 /// Builds an EIP-1559 tx with a buffered max fee (so a base-fee bump between
 /// estimation and submission — e.g. during the password prompt — doesn't
@@ -491,6 +495,7 @@ Hash: {tx_hash}"))
     }
 }
 
+/*
 /// Transfer core behind `send_tokens_to_address` — a plain ERC-20
 /// transfer(), not a swap. Same safety baseline as execute_trade: verified
 /// signer, EIP-1559 fee buffering, hard error on revert/drop/failure
@@ -570,6 +575,8 @@ fn build_send_erc20(mb_token_addr: Option<String>, to_address: &str,
    let data = err_or(Bytes::from_str(&data_hex), "Bad transfer calldata")?;
    Ok((to, data))
 }
+
+*/
 
 pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
                            registry: &TokenRegistry, from: &str, to: &str,

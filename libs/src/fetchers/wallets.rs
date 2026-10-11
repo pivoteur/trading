@@ -12,8 +12,10 @@ use book::{
 use libs::types::blockchains::Blockchain;
 
 use crate::{
-   auto_trading::query_quote,
-   clients::http_client,
+   implementation{
+      clients::http_client,
+      transactions::quotes::query_quote
+   },
    consts::DUST_EPSILON,
    hex::{ hex_to_u128, pad_address_for_call },
    types::{
