@@ -1,12 +1,16 @@
 use serde::Deserialize;
-use serde_json::{ Value, from_str, json };
+use serde_json::Value;
 
-use book::{ debug, err_utils::ErrStr };
+use book::{
+   debug,
+   currency::usd::{ USD, mk_usd },
+   err_utils::{ ErrStr, err_or }
+};
 
 use libs::types::blockchains::Blockchain;
 
 use crate::{
-   clients::http_client,
+   implementation::clients::http_client,
    types::{ rest::kyber::KyberSwap,  tokens::TokenRegistry }
 };
 

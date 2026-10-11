@@ -1,4 +1,3 @@
-pub mod consts;
 pub mod fetchers;
 pub mod git_resources;
 pub mod path_utils;

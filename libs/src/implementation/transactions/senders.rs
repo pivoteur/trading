@@ -1,11 +1,26 @@
-use ethers::types::{ U256, H160 };
+use std::str::FromStr;
 
-use super::utils::load_signer;
+use ethers::{
+   middleware::SignerMiddleware,
+   providers::{ Http, Provider },
+   types::{ Address, Bytes, U256, H160 }
+};
 
-use book::{ debug, err_utils::ErrStr, utils::pred };
-use libs::types::{
-   blockchains::Blockchain,
-   tokens::{ TokenRegistry, TokenEntry }
+use book::{
+   debug,
+   err_utils::{ ErrStr, err_or },
+   string_utils::s,
+   utils::pred
+};
+use libs::types::blockchains::Blockchain;
+use super::utils::{ build_tx_with_fee_buffer, complete_transaction };
+use crate::{
+   implementation::{
+      consts::DUST_EPSILON,
+      hex::{ pad_address_for_call, pad_u256_for_call },
+      transactions::utils::load_signer
+   },
+   types::tokens::{ TokenRegistry, TokenEntry }
 };
 
 /// Transfer core behind `send_tokens_to_address` — a plain ERC-20

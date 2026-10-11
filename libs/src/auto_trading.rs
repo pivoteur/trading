@@ -299,6 +299,7 @@ fn debug_trade_result(tx: Option<&str>, kind: &str, from: &str, to: &str,
    log!("[{}] {}", kind, line);
 }
 
+/*
 //============================================================================
 //----- Signing & Execution ----------------------------------------------------
 //============================================================================
@@ -322,7 +323,6 @@ fn gas_cost_avax(gas_used: Option<U256>, gas_price: Option<U256>) -> f32 {
     }
 }
 
-/*
 pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
                          keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
@@ -344,7 +344,6 @@ address ({expected_address}) — refusing to proceed. No funds moved."
        Ok(wallet)
     }
 }
-*/
 
 /// Builds an EIP-1559 tx with a buffered max fee (so a base-fee bump between
 /// estimation and submission — e.g. during the password prompt — doesn't
@@ -378,6 +377,7 @@ async fn build_tx_with_fee_buffer(
        gas_estimate.saturating_mul(U256::from(120)) / U256::from(100);
     Ok(tx.gas(buffered_gas))
 }
+*/
 
 /// allowance. The router can never pull more than what's approved here.
 pub async fn approve_exact_amount(
@@ -466,6 +466,7 @@ pub async fn send_swap_tx(
     complete_transaction(client, tx, "swap", true, verbose).await
 }
 
+/*
 async fn complete_transaction(
         client: &SignerMiddleware<Provider<Http>, LocalWallet>,
         tx: Eip1559TransactionRequest, tx_type: &str, check_state: bool,
@@ -495,7 +496,6 @@ Hash: {tx_hash}"))
     }
 }
 
-/*
 /// Transfer core behind `send_tokens_to_address` — a plain ERC-20
 /// transfer(), not a swap. Same safety baseline as execute_trade: verified
 /// signer, EIP-1559 fee buffering, hard error on revert/drop/failure
