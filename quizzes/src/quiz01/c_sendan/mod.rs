@@ -91,14 +91,12 @@ mod functional_tests {
       create_testing,
       async_utils::AsyncTryExt,
       date_utils::yesterday,
-      string_utils::s,
       utils::now
    };
    use libs::types::{
       blockchains::Blockchain::AVALANCHE,
       measurable::Measurable
    };
-   use trading::consts::UNDEAD;
 
    create_testing!("quiz01::c_sendan");
 
