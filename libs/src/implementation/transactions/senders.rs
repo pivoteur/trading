@@ -175,7 +175,7 @@ mod tests {
       Ok(())
    }
 
-   #[tokio::test] async fn test_check_registry_erc20_protocol_ok()
+   #[tokio::test] async fn test_check_registry_binance_erc20_ok()
          -> ErrStr<()> {
       let registry = fetch_token_registry(&BINANCE).await?;
       let chk = check_registry("eth", &registry);
