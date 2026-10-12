@@ -1,7 +1,7 @@
 use book::{ err_utils::{ ErrStr, err_or }, rest_utils::read_rest };
 use libs::types::blockchains::Blockchain;
 use crate::{
-   path_utils::token_url,
+   implementation::path_utils::token_url,
    types::tokens::{ TokenRegistry, mk_token_registry }
 };
 

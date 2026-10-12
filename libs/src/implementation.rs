@@ -1,5 +1,8 @@
-pub mod clients;
-pub mod consts;
 pub mod fetchers;
-pub mod hex;
 pub mod transactions;
+
+mod clients;
+mod consts;
+mod git_resources;
+mod hex;
+mod path_utils;
