@@ -1,13 +1,5 @@
 use clap::Parser;
 
-use trading::{
-   auto_trading::attempt_trade_with_actual_amount,
-   fetchers::tokens::fetch_token_registry,
-   types::{
-      modes::execution::{ Execution, Execution::LIVE },
-      tokens::TokenRegistry
-   }
-};
 use book::{
    parse_args_add_banner,
    cli_utils::generate_banner,
@@ -16,6 +8,7 @@ use book::{
    string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
+use trading::types::modes::execution::{ Execution, Execution::LIVE };
 
 //=================================================================
 // ----- CLI -----------------------------------------------------

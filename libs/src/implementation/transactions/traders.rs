@@ -21,128 +21,22 @@ use book::{
 };
 use libs::types::{ blockchains::Blockchain, util::Id };
 
-use super::{
-   clients::http_client,
-   consts::DUST_EPSILON,
-   hex::pad_address_for_call,
-   fetchers::wallets::fetch_token_balance,
+use crate::{
+   implementation::{
+      clients::http_client,
+      consts::DUST_EPSILON,
+      hex::pad_address_for_call,
+      fetchers::wallets::fetch_token_balance,
+   },
    types::{ rest::kyber::KyberSwap, tokens::{ TokenRegistry, TokenEntry } }
 };
-
-//============================================================================
-//----- Shared Pivot & Trade-Cycle Types ---------------------------------------
-//============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct OpenPivot {
-    pub pivot_id:      Id,
-    pub opened_at:     u64,
-    pub prim:          String,
-    pub prim_amount:   f32,
-    pub proper:        String,
-    pub proper_amount: f32
-}
-
-// "Biggest position first" — every survey/cycle closes its largest
-/// commitments before its smallest.
-pub fn biggest_first(mut pivots: Vec<OpenPivot>) -> Vec<OpenPivot> {
-    pivots.sort_by(|a, b| {
-        b.proper_amount.partial_cmp(&a.proper_amount).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    pivots
-}
-
-//----- Misfire Reporting ------------------------------------------------------
-
-/// Which half of a cycle a misfire happened in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MisfireStage {
-    Open,
-    Close,
-}
-
-impl MisfireStage {
-    fn label(self) -> &'static str {
-        match self {
-            MisfireStage::Open => "OPEN",
-            MisfireStage::Close => "CLOSE",
-        }
-    }
-}
-
-/// Guesses a misfire's likely cause from the error text, loose substring match.
-fn classify_misfire(err: &str) -> (&'static str, &'static str) {
-    let e = err.to_lowercase();
-    if e.contains("quote moved below your floor") {
-        (
-            "price moved between quoting and execution, past slippage tolerance",
-            "no funds moved. If this repeats on this pair, slippage tolerance may be too tight.",
-        )
-    } else if e.contains("could not decrypt keystore") {
-        (
-            "keystore could not be decrypted with the password given",
-            "check the keystore path and password secret match this wallet.",
-        )
-    } else if e.contains("does not match expected address") {
-        (
-            "keystore decrypted fine but belongs to a different wallet",
-            "check the keystore wired into this run is really this instance's own.",
-        )
-    } else if e.contains("reverted on-chain") {
-        (
-            "transaction was accepted but reverted on execution",
-            "check the tx hash on snowtrace.io -- usually a stale route or allowance mismatch.",
-        )
-    } else if e.contains("dropped or replaced") {
-        (
-            "transaction never confirmed -- dropped or replaced",
-            "no funds spent; usually a gas-price race. Safe to let the next cycle retry.",
-        )
-    } else if e.contains("kyberswap") || e.contains("routesummary") || e.contains("router") {
-        (
-            "the KyberSwap quote/build request itself failed",
-            "usually transient. If it repeats every cycle, check KyberSwap's API status.",
-        )
-    } else if e.contains("rpc") {
-        (
-            "the Avalanche RPC endpoint didn't answer cleanly",
-            "usually transient. If it repeats every cycle, the RPC endpoint may be degraded.",
-        )
-    } else if e.contains("no tokens.toml entry") || e.contains("missing address") {
-        (
-            "a token this trade needed isn't registered correctly in tokens.toml",
-            "check the token's entry in tokens.toml -- a config problem, will fail every cycle.",
-        )
-    } else {
-        (
-            "not a recognized failure shape -- see the raw error below",
-            "read the raw error text below.",
-        )
-    }
-}
-
-/// Prints a misfire to stdout with a likely cause, not just the raw error.
-pub fn report_misfire(stage: MisfireStage, pivot_id: Option<Id>, from: &str, to: &str, amount: f64, err: &str) {
-    let (why, how) = classify_misfire(err);
-    let pivot_label = pivot_id.map(|id| format!("pivot #{id}")).unwrap_or_else(|| "new position".to_string());
-
-    println!(
-        "  ! MISFIRE [{}] {pivot_label} {from}->{to} (attempted {amount:.8} {from}): {err}",
-        stage.label()
-    );
-    println!("      likely cause: {why} -- {how}");
-}
 
 //============================================================================
 //----- Shared Trade-Attempt Helper --------------------------------------------
 //============================================================================
 
-#[derive(Debug)]
-pub enum AttemptOutcome {
-    NotCleared,
-    DryRunWouldClear { quoted_amount_out: f32 },
-    Executed { tx_hash: String, actual_received: f32, gas_avax: f32 },
-}
+#[derive(Debug, Clone)]
+pub struct Executed { tx_hash: String, actual_received: f32, gas_avax: f32 };
 
 fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
     min_floor / (1.0 - slippage_bps as f32 / 10_000.0)
@@ -154,48 +48,40 @@ fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
 pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
      addy: &str, registry: &TokenRegistry, from: &str, to: &str, amount: f32,
      min_floor: f32, slippage_bps: u16, keystore_path: &str,
-     dry_run: bool, debug: bool) -> ErrStr<AttemptOutcome> {
+     debug: bool) -> ErrStr<Executed> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     let swap = query_swap(blockchain, registry, from, to, amount, debug).await?;
-    if swap.amount_out <= guaranteed_floor {
-            debug_trade_result(None, "NOT CLEARED", from, to, amount, &swap,
-                               min_floor, debug);
-        Ok(AttemptOutcome::NotCleared)
-    } else {
-        if dry_run {
-           debug_trade_result(None, "DRY-RUN WOULD CLEAR", from, to, amount,
-                              &swap, min_floor, debug);
-           Ok(AttemptOutcome::DryRunWouldClear {
-              quoted_amount_out: swap.amount_out
-           })
-        } else {
-            fn n(x: Option<f32>) -> f32 { x.unwrap_or(0.0) }
-            let balance_before =
-               fetch_token_balance(blockchain, addy, to, registry, debug).await?;
-            let (tx_hash, gas_avax) =
-               execute_trade(blockchain, addy, registry, from, to, amount,
-                             min_floor, slippage_bps, keystore_path,
-                             debug).await?;
-            let balance_after =
-               fetch_token_balance(blockchain, addy, to, registry, debug).await?;
-            let actual_received = n(balance_after) - n(balance_before);
-            debug_trade_result(Some(&tx_hash), "EXECUTED", from, to,
-                                   amount, &swap, min_floor, debug);
-            Ok(AttemptOutcome::Executed { tx_hash, actual_received, gas_avax })
-        }
-    }
+    pred(swap.amount_out > guaranteed_floor, ())
+        .ok_or(debug_trade_result(None, "NOT CLEARED", from, to, amount,
+                                  &swap, min_floor, debug))
+        .async_and_then(async |_| then_trade().await)
+}
+
+async fn then_trade() -> ErrStr<Executed> {
+   fn n(x: Option<f32>) -> f32 { x.unwrap_or(0.0) }
+   let balance_before =
+      fetch_token_balance(blockchain, addy, to, registry, debug).await?;
+   let (tx_hash, gas_avax) =
+      execute_trade(blockchain, addy, registry, from, to, amount, min_floor,
+                    slippage_bps, keystore_path, debug).await?;
+   let balance_after =
+      fetch_token_balance(blockchain, addy, to, registry, debug).await?;
+   let actual_received = n(balance_after) - n(balance_before);
+   debug_trade_result(Some(&tx_hash), "EXECUTED", from, to, amount, &swap, 
+                      min_floor, debug);
+   Ok(Executed { tx_hash, actual_received, gas_avax })
 }
 
 fn debug_trade_result(tx: Option<&str>, kind: &str, from: &str, to: &str,
                       amount: f32, swap: &KyberSwap, min_floor: f32,
-                      debug: bool) {
+                      debug: bool) -> String {
    debug!("attempt_trade_with_actual_amount", debug);
    let trade = format!("Trade {from} -> {to}");
    let mb_tx = tx.and_then(|t| Some(format!("tx {t}"))).unwrap_or_default();
    let swap = format!("swap {amount:.4} -> {:.4}", swap.amount_out);
    let floor = format!("(floor {min_floor:.4})");
    let line = format!("{trade} {mb_tx} {swap} {floor}");
-   log!("[{}] {}", kind, line);
+   format!("[{kind}] {line}")
 }
 
 /// allowance. The router can never pull more than what's approved here.
