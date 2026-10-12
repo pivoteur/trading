@@ -2,10 +2,10 @@ use chrono::NaiveDate;
 use clap::Parser;
 
 use book::{
-    parse_args_add_banner,
-    cli_utils::generate_banner,
-    csv_utils::list_csv,
-    err_utils::ErrStr
+   parse_args_add_banner,
+   cli_utils::generate_banner,
+   csv_utils::list_csv,
+   err_utils::ErrStr
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
@@ -14,7 +14,7 @@ use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.3.1")]
+#[command(version = "1.3.3")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -36,7 +36,7 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
     let args = parse_args_add_banner!(Args);
-    let mu_keystore = "xyz"; // we only read from this wallet
+    let mu_keystore = "xyz"; // we only read from this wallet, not write
     let wallet =
        connect_wallet(&args.blockchain, &args.wallet_address, mu_keystore,
                       args.debug).await?;

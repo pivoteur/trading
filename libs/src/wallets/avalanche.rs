@@ -2,7 +2,7 @@ use std::fmt;
 use async_trait::async_trait;
 
 use crate::{
-   fetchers::tokens::fetch_token_registry,
+   implementation::fetchers::tokens::fetch_token_registry,
    types::{ tokens::TokenRegistry, wallets::Wallet }
 };
 

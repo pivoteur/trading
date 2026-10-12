@@ -12,9 +12,12 @@ use book::{
 };
 use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
 use super::{ balances::tokens::as_assets, tokens::TokenRegistry };
-use crate::{
-   auto_trading::{ query_quote, send_tokens_to_address },
-   fetchers::wallets::fetch_wallet_balances
+use crate::implementation::{
+   fetchers::wallets::fetch_wallet_balances,
+   transactions::{
+      quotes::query_quote,
+      senders::send_tokens_to_address
+   }
 };
 
 #[async_trait(?Send)]

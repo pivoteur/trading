@@ -11,7 +11,7 @@ use super::{
 };
 
 use crate::{
-   fetchers::tokens::fetch_token_registry,
+   implementation::fetchers::tokens::fetch_token_registry,
    types::wallets::Wallet
 };
 
