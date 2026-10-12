@@ -12,10 +12,12 @@ use book::{
 use libs::types::blockchains::Blockchain;
 
 use crate::{
-   auto_trading::query_quote,
-   clients::http_client,
-   consts::DUST_EPSILON,
-   hex::{ hex_to_u128, pad_address_for_call },
+   implementation::{
+      clients::http_client,
+      consts::DUST_EPSILON,
+      hex::{ hex_to_u128, pad_address_for_call },
+      transactions::quotes::query_quote
+   },
    types::{
       balances::tokens::{ TokenBalance, mk_token_balance },
       tokens::TokenRegistry

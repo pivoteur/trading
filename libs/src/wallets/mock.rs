@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-   auto_trading::query_quote,
-   fetchers::tokens::fetch_token_registry,
+   implementation::{
+      fetchers::tokens::fetch_token_registry,
+      transactions::quotes::query_quote
+   },
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
-      modes::execution::{ Execution, Execution::DRYRUN },
       tokens::TokenRegistry,
       wallets::Wallet
    }
@@ -17,7 +18,8 @@ use crate::{
 use book::{
    not_implemented,
    currency::usd::{ USD, mk_usd },
-   err_utils::ErrStr
+   err_utils::ErrStr,
+   string_utils::s
 };
 
 use libs::{
@@ -57,7 +59,7 @@ impl Wallet for MockWallet {
    fn token_registry(&self) -> &TokenRegistry {
       not_implemented!("token_registry")
    }
-   fn mode(&self) -> Execution { DRYRUN }
+   fn mode(&self) -> String { s("DRY-RUN") }
    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
       // You can use the concrete type's format logic here
       write!(f, "{:?}", self)

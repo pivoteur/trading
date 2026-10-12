@@ -33,6 +33,8 @@ jobs:
         with:
           path: trading
 
+#         repository: pivoteur/trading   # put this line from your repository
+
       - name: Load Shared Environment Variables
         uses: doughepi/yaml-env-action@v1.0.0
         with:
@@ -76,6 +78,10 @@ jobs:
         with:
           repository: logicalgraphs/crypto-n-rust
           path: crypto-n-rust
+
+      - name: Setting date
+        run: |
+          echo "LE_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
       - name: Build dapp
         if: steps.binary-cache.outputs.cache-hit != 'true'

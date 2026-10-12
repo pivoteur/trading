@@ -11,6 +11,8 @@ pub fn hex_to_u128(hex: &str) -> ErrStr<u128> {
            &format!("Could not parse hex balance '{hex}'"))
 }
 
+pub fn pad_u256_for_call(amount: u128) -> String { format!("{amount:064x}") }
+
 // ----- TESTS -------------------------------------------------------
 
 #[cfg(test)]

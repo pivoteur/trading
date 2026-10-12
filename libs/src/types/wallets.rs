@@ -3,16 +3,21 @@ use std::fmt;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-use book::{ debug, not_implemented, currency::usd::USD, err_utils::ErrStr };
-use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
-use super::{
-   balances::tokens::as_assets,
-   modes::execution::{ Execution, Execution::LIVE },
-   tokens::TokenRegistry
+use book::{
+   debug,
+   not_implemented,
+   currency::usd::USD,
+   err_utils::ErrStr,
+   string_utils::s
 };
-use crate::{
-   auto_trading::{ query_quote, send_tokens_to_address },
-   fetchers::wallets::fetch_wallet_balances
+use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
+use super::{ balances::tokens::as_assets, tokens::TokenRegistry };
+use crate::implementation::{
+   fetchers::wallets::fetch_wallet_balances,
+   transactions::{
+      quotes::query_quote,
+      senders::send_tokens_to_address
+   }
 };
 
 #[async_trait(?Send)]
@@ -64,7 +69,7 @@ pub trait Wallet: Sync {
    fn keystore_path(&self) -> &str;
    fn wallet_address(&self) -> &str;
    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
-   fn mode(&self) -> Execution { LIVE }
+   fn mode(&self) -> String { s("LIVE") }
 }
 
 // 2. Implement fmt::Display for the dyn trait object itself

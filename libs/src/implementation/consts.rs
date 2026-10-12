@@ -3,4 +3,3 @@
 //============================================================================
 
 pub const DUST_EPSILON: f32 = 1e-8;
-pub const UNDEAD: &'static str = "UNDEAD";
