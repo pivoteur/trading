@@ -11,6 +11,13 @@ use ethers::{
 use book::{ debug, err_utils::{ ErrStr, err_or } };
 use libs::types::blockchains::Blockchain;
 
+pub fn f32_2_u128(amount: f32, decimals: i32) -> u128 {
+   (amount * 10f32.powi(decimals)).round() as u128
+}
+pub fn u128_2_f32(amount_base: u128, decimals: i32) -> f32 {
+   amount_base as f32 / 10f32.powi(decimals)
+}
+
 pub async fn load_signer(blockchain: &Blockchain, expected_address: &str,
                          keystore_path: &str) -> ErrStr<LocalWallet> {
     let password = match std::env::var("KEYSTORE_PASSWORD") {
@@ -53,10 +60,7 @@ pub async fn build_tx_with_fee_buffer(
         .data(data)
         .max_fee_per_gas(buffered_max_fee)
         .max_priority_fee_per_gas(max_priority_fee);
-    if let Some(value) = mb_value {
-       tx = tx.value(value);
-    }
-
+    mb_value.and_then(|value| { tx = tx.clone().value(value); Some(()) });
     let typed: TypedTransaction = tx.clone().into();
     let gas_estimate = err_or(client.estimate_gas(&typed, None).await,
                               "Could not estimate gas limit")?;
@@ -110,3 +114,46 @@ fn gas_cost_avax(gas_used: Option<U256>, gas_price: Option<U256>) -> f32 {
     }
 }
 
+// ----- TESTS -------------------------------------------------------
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod test_data {
+   pub const ZERONE: u128 = 100000007020609536;
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use super::test_data::ZERONE;
+   use paste::paste;
+   use book::create_testing;
+
+   create_testing!("implementation::transactions::utils");
+
+   run!("f32_2_u128", {
+      let ans = f32_2_u128(0.1, 18);
+      println!("f32 0.1 as u128 is {ans}");
+   });
+
+   run!("u128_2_f32", {
+      let ans = u128_2_f32(ZERONE, 18);
+      println!("u128 {ZERONE} as f32 is {ans}");
+   });
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod tests {
+   use super::*;
+   use book::num::estimate::mk_estimate;
+
+   #[test] fn test_f32_fns_idempotent() {
+      let one = 1.0;
+      let x = f32_2_u128(one, 18);
+      let x1 = u128_2_f32(x, 18);
+      let oneish = mk_estimate(x1);
+      oneish.approximates(one);
+   }
+}

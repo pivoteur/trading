@@ -4,8 +4,10 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-   fetchers::tokens::fetch_token_registry,
-   implementation::transactions::quotes::query_quote,
+   implementation::{
+      fetchers::tokens::fetch_token_registry,
+      transactions::quotes::query_quote
+   },
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
       tokens::TokenRegistry,

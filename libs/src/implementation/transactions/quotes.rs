@@ -13,6 +13,7 @@ use crate::{
    implementation::clients::http_client,
    types::{ rest::kyber::KyberSwap,  tokens::TokenRegistry }
 };
+use super::utils::{ u128_2_f32, f32_2_u128 };
 
 pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
                          tok: &str, debug: bool) -> ErrStr<USD> {
@@ -54,8 +55,7 @@ pub async fn query_swap(
     let token_out = to_entry.address.as_ref()
                             .ok_or_else(|| format!("No address for {to}"))?;
 
-    let amount_in_base =
-       (amount * 10f32.powi(from_entry.decimals as i32)).round() as u128;
+    let amount_in_base = f32_2_u128(amount, from_entry.decimals as i32);
 
     // 2. Use reqwest's query params instead of manual string formatting
     let url = format!("{}/routes", api_url(blockchain));
@@ -93,8 +93,9 @@ pub async fn query_swap(
         .ok_or_else(|| "Response missing amountOut".to_string())?;
 
     let raw: u128 =
-       err_or(amount_out_str.parse(), "Could not parse amountOut")?;
-    let amount_out = raw as f32 / 10f32.powi(to_entry.decimals as i32);
+       err_or(amount_out_str.parse(),
+              &format!("Could not parse amountOut: '{amount_out_str}'"))?;
+    let amount_out = u128_2_f32(raw, to_entry.decimals as i32);
 
     log!("For {}, ratio is {}", swap, amount_out);
 
@@ -108,4 +109,41 @@ pub async fn query_swap(
 fn api_url(blockchain: &Blockchain) -> String {
     let base_url = "https://aggregator-api.kyberswap.com";
     format!("{base_url}/{}/api/v1", blockchain.blockchain())
+}
+
+//============================================================================
+//----- TESTS -------------------------------------------------------------
+//============================================================================
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use paste::paste;
+   use book::{ create_testing, string_utils::UppercaseString, utils::now };
+   use libs::types::blockchains::Blockchain::AVALANCHE;
+   use crate::implementation::fetchers::tokens::fetch_token_registry;
+
+   create_testing!("implementation::transactions::quotes");
+
+   const AVA: &Blockchain = &AVALANCHE;
+
+   async fn quote_for(token: UppercaseString) -> ErrStr<()> {
+      let reg = fetch_token_registry(AVA).await?;
+      let quote = query_quote(AVA, &reg, &token, true).await?;
+      println!("{token} quote: {quote}");
+      Ok(())
+   }
+   async fn ratio_of(primary: UppercaseString, pivot: UppercaseString)
+         -> ErrStr<()> {
+      let reg = fetch_token_registry(AVA).await?;
+      let ans = query_swap(AVA, &reg, &primary, &pivot, 1.0, true).await?;
+      println!("The {primary}/{pivot} ratio is: {ans:?}");
+      Ok(())
+   }
+
+   run!("btc_quote", now(quote_for("btc".into()))?);
+   run!("undead_quote", now(quote_for("undead".into()))?);
+   run!("btc_eth_ratio", now(ratio_of("btc".into(), "eth".into()))?);
+   run!("btc_undead_ratio", now(ratio_of("btc".into(), "undead".into()))?);
 }
