@@ -62,7 +62,8 @@ send to record.
 
 ## Revisions
 
-* 1.3.1, 2026-10-12: libs refactor and testing
+* 1.3.1 and 1.3.2, 2026-10-12: libs refactor and testing; `dry_run` now 
+`Execution`
 * 1.3.0, 2026-10-10: sending native tokens now; tested Avalanche and Binance
 * 1.2.1, 2026-10-08: fast-fail on trying to send native tokens (e.g. AVAX),
 (until I implement that functionality)

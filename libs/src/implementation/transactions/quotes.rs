@@ -13,7 +13,7 @@ use crate::{
    implementation::clients::http_client,
    types::{ rest::kyber::KyberSwap,  tokens::TokenRegistry }
 };
-use super::utils::{ u128_2_f32, f32_2_u128 };
+use super::utils::{ api_url, u128_2_f32, f32_2_u128 };
 
 pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
                          tok: &str, debug: bool) -> ErrStr<USD> {
@@ -104,11 +104,6 @@ pub async fn query_swap(
         route_summary_raw: dat.route_summary,
         router_address: dat.router_address
     })
-}
-
-fn api_url(blockchain: &Blockchain) -> String {
-    let base_url = "https://aggregator-api.kyberswap.com";
-    format!("{base_url}/{}/api/v1", blockchain.blockchain())
 }
 
 //============================================================================

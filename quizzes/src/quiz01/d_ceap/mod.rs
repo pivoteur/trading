@@ -8,7 +8,13 @@ use book::{
    string_utils::UppercaseString
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
-use trading::types::modes::execution::{ Execution, Execution::LIVE };
+use trading::{
+   types::{
+      modes::execution::{ Execution, Execution::LIVE },
+      wallets::Wallet
+   },
+   wallets::{ factory::connect_wallet, mock::mock_connection }
+};
 
 //=================================================================
 // ----- CLI -----------------------------------------------------
@@ -16,7 +22,7 @@ use trading::types::modes::execution::{ Execution, Execution::LIVE };
 
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.2.0")]
+#[command(version = "1.2.1")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -57,29 +63,27 @@ struct Args {
 }
 
 pub async fn runoff_with_args() -> ErrStr<()> {
-    let args = parse_args_add_banner!(Args);
-    let amount: f32 = args.amount.into();
-    let floor: f32 = args.floor.into();
-    let chain = &args.blockchain;
-    let registry = fetch_token_registry(chain).await?;
-    runoff_continuation(chain, &args.wallet_address,
-                        &args.keystore_path, &registry,
-                        &args.from_token, &args.to_token, amount,
-                        floor, args.slippage_bps,
-                        &args.dry_run, args.debug).await
+   let args = parse_args_add_banner!(Args);
+   let amount: f32 = args.amount.into();
+   let floor: f32 = args.floor.into();
+   let chain = &args.blockchain;
+   let debug = args.debug;
+   let wallet = if args.dry_run == LIVE {
+      connect_wallet(chain, &args.wallet_address,
+                     &args.keystore_path, debug).await?
+   } else {
+      mock_connection(chain, debug)
+   };
+   runoff_continuation(&wallet, &args.from_token, &args.to_token, amount,
+                       floor, args.slippage_bps).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain, addy: &str,
-                             keystore_path: &str, registry: &TokenRegistry,
+async fn runoff_continuation(wallet: &Box<dyn Wallet>, 
                              from: &str, to: &str,
-                             amount: f32, floor: f32, slippage: u16,
-                             dry_run: &Execution, debug: bool) -> ErrStr<()> {
-    let ans =
-        attempt_trade_with_actual_amount(blockchain, addy, &registry, from, to,
-                                         amount, floor, slippage, keystore_path,
-                                         dry_run, debug).await?;
-    println!("answer is {ans:?}");
-    Ok(())
+                             amount: f32, floor: f32, slippage: u16)
+      -> ErrStr<()> {
+   let _ = wallet.trade(from, amount, to, Some(floor), slippage).await?;
+   Ok(())
 }
 
 // =======================================================================
@@ -91,14 +95,13 @@ pub mod functional_test {
    use super::*;
    use paste::paste;
    use book::{ create_testing, utils::now };
-   use trading::types::modes::execution::Execution::DRYRUN;
+   use trading::wallets::mock::mock_connection;
 
    create_testing!("quiz01::d_ceap");
 
    run!("ceap", {
       let ava = &AVALANCHE;
-      let registry = now(fetch_token_registry(ava))?;
-      now(runoff_continuation(ava, "0x123", "xyz", &registry,
-                              "BTC", "ETH", 1.0, 16.0, 200, &DRYRUN, true))?;
+      let wallet = mock_connection(ava, true);
+      now(runoff_continuation(&wallet, "BTC", "ETH", 1.0, 16.0, 200))?;
    });
 }

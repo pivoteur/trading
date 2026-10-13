@@ -11,11 +11,13 @@ use crate::{
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
       tokens::TokenRegistry,
+      trades::{ Trade, Trade::SIMULATED },
       wallets::Wallet
    }
 };
 
 use book::{
+   debug,
    not_implemented,
    currency::usd::{ USD, mk_usd },
    err_utils::ErrStr,
@@ -49,8 +51,18 @@ impl Wallet for MockWallet {
       Ok(as_assets(&balances, self.blockchain(), date))
    }
    async fn do_send(&self, _token: &str, _to: &str, _amt: f32) -> ErrStr<()> {
+      debug!("do_send", self.debug());
+      log!("simulated-send (mock)");
       // a do-nothing method
       Ok(())
+   }
+   async fn do_trade(&self, _from: &str, _amount: f32, _to: &str,
+                     _mb_min_floor: Option<f32>, _slippage: u16)
+         -> ErrStr<Trade> {
+      debug!("do_trade", self.debug());
+      // do-nothing method
+      log!("simulated-trade (mock)");
+      Ok(SIMULATED)
    }
    fn blockchain(&self) -> &Blockchain { &self.blockchain }
    fn keystore_path(&self) -> &str { not_implemented!("keystore_path") }
@@ -117,5 +129,21 @@ mod functional_tests {
       let wallet = mock_connection(&BINANCE, true);
       let quote = now(wallet.quote("BNB"))?;
       println!("BNB quote: {quote}");
+   });
+   run!("send_avalanche", " (mock)", {
+      let wallet = mock_connection(&AVALANCHE, true);
+      now(wallet.send("undead", "0x123", 500_000.0))?;
+   });
+   run!("send_binance", " (mock)", {
+      let wallet = mock_connection(&BINANCE, true);
+      now(wallet.send("link", "0xabc", 50.0))?;
+   });
+   run!("trade_avalanche", " (mock)", {
+      let wallet = mock_connection(&AVALANCHE, true);
+      now(wallet.trade("BTC", 0.1, "eth", None, 0))?;
+   });
+   run!("trade_binance", " (mock)", {
+      let wallet = mock_connection(&BINANCE, true);
+      now(wallet.trade("BNB", 0.2, "doge", Some(1000.0), 0))?;
    });
 }

@@ -2,41 +2,45 @@ use std::str::FromStr;
 
 use ethers::{
    middleware::SignerMiddleware,
-   providers::{ Http, Middleware, Provider },
-   signers::{ LocalWallet, Signer },
-   types::{
-      Address, Bytes, H160, U256, Eip1559TransactionRequest,
-      transaction::eip2718::TypedTransaction
-   }
+   providers::{ Http, Provider },
+   signers::LocalWallet,
+   types::{ Address, Bytes }
 };
-use serde::Deserialize;
 use serde_json::{ Value, from_str, json };
 
 use book::{
    debug,
-   currency::usd::{ USD, mk_usd },
+   async_utils::AsyncTryExt,
    err_utils::{ ErrStr, err_or },
-   string_utils::s,
    utils::pred
 };
-use libs::types::{ blockchains::Blockchain, util::Id };
+use libs::types::blockchains::Blockchain;
 
 use crate::{
    implementation::{
       clients::http_client,
-      consts::DUST_EPSILON,
-      hex::pad_address_for_call,
+      hex::{ pad_address_for_call, pad_u256_for_call },
       fetchers::wallets::fetch_token_balance,
+      transactions::{
+         quotes::query_swap,
+         utils::{
+            api_url,
+            build_tx_with_fee_buffer,
+            complete_transaction,
+            load_signer
+         }
+      }
    },
-   types::{ rest::kyber::KyberSwap, tokens::{ TokenRegistry, TokenEntry } }
+   types::{
+      rest::kyber::KyberSwap,
+      tokens::TokenRegistry,
+      trades::{ Trade, Trade::* }
+   }
 };
 
 //============================================================================
 //----- Shared Trade-Attempt Helper --------------------------------------------
 //============================================================================
-
-#[derive(Debug, Clone)]
-pub struct Executed { tx_hash: String, actual_received: f32, gas_avax: f32 };
 
 fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
     min_floor / (1.0 - slippage_bps as f32 / 10_000.0)
@@ -48,16 +52,23 @@ fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
 pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
      addy: &str, registry: &TokenRegistry, from: &str, to: &str, amount: f32,
      min_floor: f32, slippage_bps: u16, keystore_path: &str,
-     debug: bool) -> ErrStr<Executed> {
+     debug: bool) -> ErrStr<Trade> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     let swap = query_swap(blockchain, registry, from, to, amount, debug).await?;
     pred(swap.amount_out > guaranteed_floor, ())
         .ok_or(debug_trade_result(None, "NOT CLEARED", from, to, amount,
                                   &swap, min_floor, debug))
-        .async_and_then(async |_| then_trade().await)
+        .async_and_then(async |_|
+           then_trade(blockchain, addy, registry, from, amount, to, min_floor,
+                      slippage_bps, &swap, keystore_path, debug).await).await
 }
 
-async fn then_trade() -> ErrStr<Executed> {
+async fn then_trade(blockchain: &Blockchain, addy: &str,
+                    registry: &TokenRegistry,
+                    from: &str, amount: f32, to: &str,
+                    min_floor: f32, slippage_bps: u16, swap: &KyberSwap,
+                    keystore_path: &str, debug: bool) -> ErrStr<Trade> {
+   debug!("then_trade", debug);
    fn n(x: Option<f32>) -> f32 { x.unwrap_or(0.0) }
    let balance_before =
       fetch_token_balance(blockchain, addy, to, registry, debug).await?;
@@ -67,21 +78,25 @@ async fn then_trade() -> ErrStr<Executed> {
    let balance_after =
       fetch_token_balance(blockchain, addy, to, registry, debug).await?;
    let actual_received = n(balance_after) - n(balance_before);
-   debug_trade_result(Some(&tx_hash), "EXECUTED", from, to, amount, &swap, 
+   debug_trade_result(Some(&tx_hash), "EXECUTED", from, to, amount, swap, 
                       min_floor, debug);
-   Ok(Executed { tx_hash, actual_received, gas_avax })
+   let trade = EXECUTED { tx_hash, actual_received, gas_avax };
+   log!("Trade result: {}", format!("{:?}", trade));
+   Ok(trade)
 }
 
 fn debug_trade_result(tx: Option<&str>, kind: &str, from: &str, to: &str,
                       amount: f32, swap: &KyberSwap, min_floor: f32,
-                      debug: bool) -> String {
-   debug!("attempt_trade_with_actual_amount", debug);
+                      verbose: bool) -> String {
+   debug!("attempt_trade_with_actual_amount", verbose);
    let trade = format!("Trade {from} -> {to}");
    let mb_tx = tx.and_then(|t| Some(format!("tx {t}"))).unwrap_or_default();
    let swap = format!("swap {amount:.4} -> {:.4}", swap.amount_out);
    let floor = format!("(floor {min_floor:.4})");
    let line = format!("{trade} {mb_tx} {swap} {floor}");
-   format!("[{kind}] {line}")
+   let ans = format!("[{kind}] {line}");
+   log!("{}", ans);
+   ans
 }
 
 /// allowance. The router can never pull more than what's approved here.
@@ -245,29 +260,21 @@ async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
 mod functional_tests {
    use super::*;
    use paste::paste;
-   use book::{ create_testing, utils::now };
-   use crate::fetchers::tokens::fetch_token_registry;
+   use book::create_testing;
 
-   create_testing!("auto_trading");
+   create_testing!("implementation::transactions::traders");
 
    run!("slippage", " (0.78 ETH at 200 BPS)", {
        let floor = 0.78;
        let adjusted = slippage_adjusted_floor(floor, 200);
        println!("adjusted floor at 200 BPS for 0.78 ETH is {adjusted:.4}");
    });
-
 }
 
 #[cfg(test)]
 #[cfg(not(tarpaulin_include))]
 mod tests {
     use super::*;
-    use crate::{
-       consts::UNDEAD,
-       fetchers::tokens::fetch_token_registry
-    };
-    use libs::types::blockchains::Blockchain::AVALANCHE;
-    use book::string_utils::s;
 
     #[test]
     fn test_slippage_adjusted_floor_raises_the_bar_by_the_tolerance() {
@@ -288,75 +295,5 @@ mod tests {
        assert_eq!(slippage_adjusted_floor(500_000.0, 0), 500_000.0);
     }
 
-    #[test]
-    fn test_biggest_first_sorts_by_raw_proper_amount_descending() {
-        let mk_open_pivot = |id: Id, proper_amount: f32| OpenPivot {
-            pivot_id: id, opened_at: 0, prim: s("X"), prim_amount: 0.0,
-            proper: s("Y"), proper_amount
-        };
-        let pivots =
-           vec![mk_open_pivot(1, 5e5), mk_open_pivot(2, 0.005),
-                mk_open_pivot(3, 5.2e5)];
-        let sorted = biggest_first(pivots);
-        let ids: Vec<Id> = sorted.iter().map(|p| p.pivot_id).collect();
-        assert_eq!(ids, vec![3, 1, 2],
-                   "should be ordered biggest proper_amount to smallest,
-raw number, no currency conversion");
-    }
-
-    #[tokio::test] async fn fail_send_tokens_zero_amount() -> ErrStr<()> {
-        let registry = fetch_token_registry(&AVALANCHE).await?;
-        let result = send_tokens_to_address(
-            &AVALANCHE, "0x123", &registry, UNDEAD,
-            "0x000000000000000000000000000000000000CD", 0.0, 
-            "xyz", true).await;
-        assert!(result.is_err(),
-                "a zero amount must never reach the wallet-balance check");
-        Ok(())
-    }
-
-/* TODO: needs a mock-wallet implementation with a token-balance
-   #[tokio::test]
-   async fn fail_send_tokens_insufficient_liquidity() -> ErrStr<()> {
-
-        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
-
-        let registry = fetch_token_registry(&AVALANCHE).await?;
-        let max_amt0 = fetch_token_balance(&AVALANCHE, TEST_ADDRESS, UNDEAD,
-                                   &registry, true).await?;
-        let max_amt = max_amt0.unwrap_or(0.0);
-        let overflow = max_amt + 10000.0;
-        let result = send_tokens_to_address(
-           &AVALANCHE, TEST_ADDRESS, &registry, UNDEAD,
-           "0x000000000000000000000000000000000000CD",
-           overflow, "xyz", true).await;
-        assert!(result.is_err(), "Sent too many tokens ({overflow})");
-
-        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
-        
-        Ok(())
-   }
-
-// I need to find a way to test sending native tokens using mocks
-   #[tokio::test] async fn fail_send_native_token() -> ErrStr<()> {
-
-        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
-
-        let registry = fetch_token_registry(&AVALANCHE).await?;
-        let result =
-           send_tokens_to_address(&AVALANCHE, "0xabc", &registry, "avax",
-                   "0x123", 0.01, "xyz", true).await;
-
-        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
-
-        match result {
-           Ok(x) =>
-              Err(format!("Send is okay to send native token (AVAX) {x:?}")),
-           Err(err) => {
-              assert!(err.contains("Native"), "Failed for wrong error: {err}");
-              Ok(())
-           }
-        }
-   }
-*/
+// TODO: I don't have tests for trades
 }
