@@ -23,7 +23,7 @@ use trading::{
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.3.2")]
+#[command(name = "sendan", version = "1.3.3")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -71,7 +71,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
        connect_wallet(chain, &args.wallet_address,
                       &args.keystore_path, debug).await?
     } else {
-       mock_connection(chain, debug)
+       mock_connection(chain, debug).await?
     };
     runoff_continuation(&wallet, amount, &args.token, to).await
 }

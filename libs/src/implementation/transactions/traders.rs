@@ -10,7 +10,6 @@ use serde_json::{ Value, from_str, json };
 
 use book::{
    debug,
-   async_utils::AsyncTryExt,
    err_utils::{ ErrStr, err_or },
    utils::pred
 };
@@ -49,26 +48,22 @@ fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
 /// Quotes, checks the floor, and (unless dry-running) executes — the one
 /// trade-attempt pipeline every pivot open/close in this system goes
 /// through, regardless of which binary is calling it.
-pub async fn attempt_trade_with_actual_amount(blockchain: &Blockchain,
-     addy: &str, registry: &TokenRegistry, from: &str, to: &str, amount: f32,
-     min_floor: f32, slippage_bps: u16, keystore_path: &str,
-     debug: bool) -> ErrStr<Trade> {
+pub async fn check_floor(blockchain: &Blockchain, registry: &TokenRegistry,
+                         from: &str, to: &str, amount: f32, min_floor: f32,
+                         slippage_bps: u16, debug: bool) -> ErrStr<KyberSwap> {
     let guaranteed_floor = slippage_adjusted_floor(min_floor, slippage_bps);
     let swap = query_swap(blockchain, registry, from, to, amount, debug).await?;
-    pred(swap.amount_out > guaranteed_floor, ())
+    pred(swap.amount_out > guaranteed_floor, swap.clone())
         .ok_or(debug_trade_result(None, "NOT CLEARED", from, to, amount,
                                   &swap, min_floor, debug))
-        .async_and_then(async |_|
-           then_trade(blockchain, addy, registry, from, amount, to, min_floor,
-                      slippage_bps, &swap, keystore_path, debug).await).await
 }
 
-async fn then_trade(blockchain: &Blockchain, addy: &str,
-                    registry: &TokenRegistry,
-                    from: &str, amount: f32, to: &str,
-                    min_floor: f32, slippage_bps: u16, swap: &KyberSwap,
-                    keystore_path: &str, debug: bool) -> ErrStr<Trade> {
-   debug!("then_trade", debug);
+pub async fn trade(blockchain: &Blockchain, addy: &str,
+                   registry: &TokenRegistry,
+                   from: &str, amount: f32, to: &str,
+                   min_floor: f32, slippage_bps: u16, swap: &KyberSwap,
+                   keystore_path: &str, debug: bool) -> ErrStr<Trade> {
+   debug!("trade", debug);
    fn n(x: Option<f32>) -> f32 { x.unwrap_or(0.0) }
    let balance_before =
       fetch_token_balance(blockchain, addy, to, registry, debug).await?;

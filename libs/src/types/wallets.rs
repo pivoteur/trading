@@ -12,6 +12,7 @@ use book::{
 use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
 use super::{
    balances::tokens::as_assets,
+   rest::kyber::KyberSwap,
    tokens::TokenRegistry,
    trades::Trade
 };
@@ -20,7 +21,7 @@ use crate::implementation::{
    transactions::{
       quotes::query_quote,
       senders::send_tokens_to_address,
-      traders::attempt_trade_with_actual_amount
+      traders::{ check_floor, trade as execute_trade }
    }
 };
 
@@ -70,18 +71,18 @@ pub trait Wallet: Sync {
                          min_floor.and_then(|x| Some(format!(" (min: {x})")))
                                   .unwrap_or_default());
       log!("trading {}", swap);
-      self.do_trade(from, amount, to, min_floor, slippage).await
+      let min = min_floor.unwrap_or_default();
+      let query =
+         check_floor(self.blockchain(), self.token_registry(), from, to, amount,                     min, slippage, self.debug()).await?;
+      self.do_trade(from, amount, to, min, slippage, &query).await
    }
 
    async fn do_trade(&self, from: &str, amount: f32, to: &str,
-                     mb_min_floor: Option<f32>, slippage: u16)
+                     min_floor: f32, slippage: u16, swap: &KyberSwap)
          -> ErrStr<Trade> {
-      let min_floor = mb_min_floor.unwrap_or_default();
-      let trade = attempt_trade_with_actual_amount(self.blockchain(),
-                           self.wallet_address(), self.token_registry(),
-                           from, to, amount, min_floor, slippage,
-                           self.keystore_path(), self.debug()).await?;
-      Ok(trade)
+      execute_trade(self.blockchain(), self.wallet_address(),
+                    self.token_registry(), from, amount, to, min_floor,
+                    slippage, swap, self.keystore_path(), self.debug()).await
    }
    fn blockchain(&self) -> &Blockchain;
    fn token_registry(&self) -> &TokenRegistry;

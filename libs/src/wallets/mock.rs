@@ -10,6 +10,7 @@ use crate::{
    },
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
+      rest::kyber::KyberSwap,
       tokens::TokenRegistry,
       trades::{ Trade, Trade::SIMULATED },
       wallets::Wallet
@@ -32,7 +33,11 @@ use libs::{
 // ----- MOCKS -------------------------------------------------------
 
 #[derive(Debug)]
-pub struct MockWallet { blockchain: Blockchain, debug: bool }
+pub struct MockWallet {
+   blockchain: Blockchain,
+   tokens: TokenRegistry,
+   debug: bool
+}
 
 #[async_trait(?Send)]
 impl Wallet for MockWallet {
@@ -57,7 +62,7 @@ impl Wallet for MockWallet {
       Ok(())
    }
    async fn do_trade(&self, _from: &str, _amount: f32, _to: &str,
-                     _mb_min_floor: Option<f32>, _slippage: u16)
+                     _min_floor: f32, _slippage: u16, _swap: &KyberSwap)
          -> ErrStr<Trade> {
       debug!("do_trade", self.debug());
       // do-nothing method
@@ -69,7 +74,7 @@ impl Wallet for MockWallet {
    fn wallet_address(&self) -> &str { "0xmock_address" }
    fn debug(&self) -> bool { true }
    fn token_registry(&self) -> &TokenRegistry {
-      not_implemented!("token_registry")
+      &self.tokens
    }
    fn mode(&self) -> String { s("DRY-RUN") }
    fn fmt_wallet(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -78,9 +83,10 @@ impl Wallet for MockWallet {
    }
 }
 
-pub fn mock_connection(blockchain: &Blockchain, debug: bool)
-      -> Box<dyn Wallet> {
-   Box::new(MockWallet { blockchain: blockchain.clone(), debug })
+pub async fn mock_connection(blockchain: &Blockchain, debug: bool)
+      -> ErrStr<Box<dyn Wallet>> {
+   let tokens = fetch_token_registry(blockchain).await?;
+   Ok(Box::new(MockWallet { blockchain: blockchain.clone(), tokens, debug }))
 }
 
 // ----- TESTS -------------------------------------------------------
@@ -101,49 +107,49 @@ mod functional_tests {
    create_testing!("wallets::mock");
 
    run!("connection_avalanche", " (mock)", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet = now(mock_connection(&AVALANCHE, true))?;
       println!("My Avalanche wallet is:\n{wallet}");
    });
    run!("connection_binance", " (mock)", {
-      let wallet = mock_connection(&BINANCE, true);
+      let wallet = now(mock_connection(&BINANCE, true))?;
       println!("My Binance wallet is:\n{wallet}");
    });
    run!("balances_avalanche", " (mock)", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet = now(mock_connection(&AVALANCHE, true))?;
       let yday = &yesterday();
       let balances = now(wallet.balances(yday))?;
       println!("Avalanche Wallet balances:\n{}", list_csv(&[balances], true));
    });
    run!("balances_binance", " (mock)", {
-      let wallet = mock_connection(&BINANCE, true);
+      let wallet = now(mock_connection(&BINANCE, true))?;
       let yday = &yesterday();
       let balances = now(wallet.balances(yday))?;
       println!("Binance Wallet balances:\n{}", list_csv(&[balances], true));
    });
    run!("quotes_avalanche", " (mock)", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet = now(mock_connection(&AVALANCHE, true))?;
       let quote = now(wallet.quote("AVAX"))?;
       println!("AVAX quote: {quote}");
    });
    run!("quotes_binance", " (mock)", {
-      let wallet = mock_connection(&BINANCE, true);
+      let wallet = now(mock_connection(&BINANCE, true))?;
       let quote = now(wallet.quote("BNB"))?;
       println!("BNB quote: {quote}");
    });
    run!("send_avalanche", " (mock)", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet = now(mock_connection(&AVALANCHE, true))?;
       now(wallet.send("undead", "0x123", 500_000.0))?;
    });
    run!("send_binance", " (mock)", {
-      let wallet = mock_connection(&BINANCE, true);
+      let wallet = now(mock_connection(&BINANCE, true))?;
       now(wallet.send("link", "0xabc", 50.0))?;
    });
    run!("trade_avalanche", " (mock)", {
-      let wallet = mock_connection(&AVALANCHE, true);
+      let wallet = now(mock_connection(&AVALANCHE, true))?;
       now(wallet.trade("BTC", 0.1, "eth", None, 0))?;
    });
    run!("trade_binance", " (mock)", {
-      let wallet = mock_connection(&BINANCE, true);
+      let wallet = now(mock_connection(&BINANCE, true))?;
       now(wallet.trade("BNB", 0.2, "doge", Some(1000.0), 0))?;
    });
 }

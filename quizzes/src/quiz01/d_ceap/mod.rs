@@ -22,7 +22,7 @@ use trading::{
 
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.2.1")]
+#[command(version = "1.2.2")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -72,7 +72,7 @@ pub async fn runoff_with_args() -> ErrStr<()> {
       connect_wallet(chain, &args.wallet_address,
                      &args.keystore_path, debug).await?
    } else {
-      mock_connection(chain, debug)
+      mock_connection(chain, debug).await?
    };
    runoff_continuation(&wallet, &args.from_token, &args.to_token, amount,
                        floor, args.slippage_bps).await

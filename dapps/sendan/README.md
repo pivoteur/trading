@@ -62,6 +62,7 @@ send to record.
 
 ## Revisions
 
+* 1.3.3, 2026-10-20: `mock_wallet` is now `async`
 * 1.3.1 and 1.3.2, 2026-10-12: libs refactor and testing; `dry_run` now 
 `Execution`
 * 1.3.0, 2026-10-10: sending native tokens now; tested Avalanche and Binance

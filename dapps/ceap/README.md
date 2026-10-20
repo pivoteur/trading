@@ -40,6 +40,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
+* 1.2.2, 2026-10-20: show what would be the trade-amounts, even during `DRYRUN`
 * 1.2.1, 2026-10-12: moved most of libs to implementation-level
 * 1.2.0, 2026-10-08: shift to `Wallet` implementation; make DRY_RUN enum
 * 1.1.5, 2026-09-21: externalized token-registry
@@ -49,3 +50,10 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 * 1.1.1, 2026-09-17: allow comma-floats as inputs to `floor` and `amount`
 * 1.1.0, 2026-09-15: library-refactoring
 * 1.0.0, 2026-08-20: released
+
+-----
+
+## Verifications
+
+| blockchain | from   | amt    | to     | received | date   | tx_id  |
+| :--------- | :----- | :----- | :----- | :------- | :----- | :----- |
