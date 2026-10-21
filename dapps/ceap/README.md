@@ -56,5 +56,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Verifications
 
-| blockchain | from   | amt    | to     | received | date   | tx_id  |
-| :--------- | :----- | :----- | :----- | :------- | :----- | :----- |
+| blockchain | from   | amt       | to     | received | date       | tx_id   |
+| :--------- | :----- | --------: | :----- | -------: | :-----     | :-----: |
+| Avalanche  | UNDEAD | 70,000.00 | USDC   | 24.37    | 2026-10-21 | [https://snowtrace.io/tx/0x1d83...1061](https://snowtrace.io/tx/0x1d830b179a37ed61c3816aa5cf57d5bd58888071aa14ff3b1b95952e1774106a) |
+| Avalanche  | AVAX   | 0.01      | UNDEAD | n/a      | 2026-10-21 | 🚫 |
