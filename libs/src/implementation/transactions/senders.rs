@@ -288,7 +288,7 @@ mod tests {
         Ok(())
    }
 
-// I need to find a way to test sending native tokens using mocks
+// TODO: I need to find a way to test sending native tokens using mocks
    #[tokio::test] async fn fail_send_native_token() -> ErrStr<()> {
 
         unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }

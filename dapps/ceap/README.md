@@ -40,7 +40,8 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
-* 1.2.2, 2026-10-20: show what would be the trade-amounts, even during `DRYRUN`
+* 1.2.2, 2026-10-20: show what would be the trade-amounts, even during `DRYRUN`;
+`mock_wallet` is now `async`
 * 1.2.1, 2026-10-12: moved most of libs to implementation-level
 * 1.2.0, 2026-10-08: shift to `Wallet` implementation; make DRY_RUN enum
 * 1.1.5, 2026-09-21: externalized token-registry

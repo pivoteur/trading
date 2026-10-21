@@ -95,13 +95,12 @@ pub mod functional_test {
    use super::*;
    use paste::paste;
    use book::{ create_testing, utils::now };
-   use trading::wallets::mock::mock_connection;
 
    create_testing!("quiz01::d_ceap");
 
    run!("ceap", {
       let ava = &AVALANCHE;
-      let wallet = mock_connection(ava, true);
+      let wallet = now(mock_connection(ava, true))?;
       now(runoff_continuation(&wallet, "BTC", "ETH", 1.0, 16.0, 200))?;
    });
 }

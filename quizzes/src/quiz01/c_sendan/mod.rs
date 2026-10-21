@@ -97,17 +97,20 @@ mod functional_tests {
       utils::now
    };
    use libs::types::{
-      blockchains::Blockchain::AVALANCHE,
+      blockchains::Blockchain::{ AVALANCHE, BINANCE },
       measurable::Measurable
    };
 
+   const AVA: &Blockchain = &AVALANCHE;
+   const BIN: &Blockchain = &BINANCE;
+
    create_testing!("quiz01::c_sendan");
 
-   async fn sender(symbol: &str) -> ErrStr<()> {
-      let wallet = mock_connection(&AVALANCHE, true);
+   async fn sender(blockchain: &Blockchain, symbol: &str) -> ErrStr<()> {
+      let wallet = mock_connection(blockchain, true).await?;
       let yday = &yesterday();
       let balances = wallet.balances(yday).await?;
-      let token = balances.asset((AVALANCHE, symbol));
+      let token = balances.asset((blockchain.clone(), symbol));
       token.ok_or(format!("No {symbol} in wallet"))
            .async_and_then(async |asset| {
          let balance = asset.sz();
@@ -116,8 +119,8 @@ mod functional_tests {
          runoff_continuation(&wallet, amount, symbol, "0x123").await
       }).await
    }
-   run!("send_undead", now(sender("undead"))?);
-   run!("send_avax", now(sender("avax"))?);
-
-// TODO: add Binance blockchain tests
+   run!("send_undead", now(sender(AVA, "undead"))?);
+   run!("send_avax", now(sender(AVA, "avax"))?);
+   run!("send_eth", now(sender(BIN, "eth"))?);
+   run!("send_bnb", now(sender(BIN, "bnb"))?);
 }

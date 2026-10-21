@@ -14,7 +14,7 @@ use trading::{ types::wallets::Wallet, wallets::factory::connect_wallet };
 
 #[derive(Debug, Parser)]
 #[command(name = "gelic")]
-#[command(version = "1.3.3")]
+#[command(version = "1.3.4")]
 struct Args {
     /// The wallet to read. Required -- no env fallback.
     wallet_address: String,
@@ -64,13 +64,13 @@ pub mod functional_tests {
     create_testing!("quiz01::b_gelic");
 
     run!("gelic_avalanche", {
-        let wallet = mock_connection(&AVALANCHE, true);
+        let wallet = now(mock_connection(&AVALANCHE, true))?;
         let yday = &yesterday();
         now(runoff_continuation(&wallet, yday))?
     });
 
     run!("gelic_binance", {
-        let wallet = mock_connection(&BINANCE, true);
+        let wallet = now(mock_connection(&BINANCE, true))?;
         let yday = &yesterday();
         now(runoff_continuation(&wallet, yday))?
     });

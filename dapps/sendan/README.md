@@ -77,3 +77,11 @@ send to record.
 * 0.1.0, 2026-08-19: initial version -- one-shot ERC-20 transfer to any
   address, address-shape validation, balance pre-check, append-only send
   log with `WOULD_SEND`/`SENT`/`FAILED` outcomes.
+
+-----
+
+## Verifications
+
+| blockchain | sent   | amt    | received? | date       | tx_id  |
+| :--------- | :----- | :----- | :-------- | :--------- | :----- |
+| Avalanche  | UNDEAD | 1000   |     ✅    | 2026-10-20 | https://snowtrace.io/tx/0x983521808ba5d8ab21c86ed57e531a17fc9e994bd4c0e8b1d6a4495258d1ca6d |
