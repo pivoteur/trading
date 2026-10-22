@@ -13,7 +13,7 @@ use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 //========================================================
 #[derive(Debug, Parser)]
 #[command(name = "frignan")]
-#[command(version = "1.3.5")]
+#[command(version = "1.3.6")]
 struct Args {
     /// The token you want to see the current price of.
     token: UppercaseString,
@@ -29,7 +29,7 @@ struct Args {
 
 pub async fn runoff_with_args() -> ErrStr<()> {
   let args = parse_args_add_banner!(Args);
-  let wallet = mock_connection(&args.blockchain, args.debug);
+  let wallet = mock_connection(&args.blockchain, args.debug).await?;
   runoff_continuation(&wallet, &args.token).await
 }
 
@@ -54,32 +54,32 @@ pub mod functional_test {
     create_testing!("quiz01::a_frignan");
 
     run!("btc", {
-        let wallet = mock_connection(&AVALANCHE, true);
+        let wallet = now(mock_connection(&AVALANCHE, true))?;
         now(runoff_continuation(&wallet, "BTC"))?
     });
 
     run!("undead", {
-        let wallet = mock_connection(&AVALANCHE, false);
+        let wallet = now(mock_connection(&AVALANCHE, false))?;
         now(runoff_continuation(&wallet, "UNDEAD"))?
     });
 
     run!("bnb", {
-        let wallet = mock_connection(&BINANCE, true);
+        let wallet = now(mock_connection(&BINANCE, true))?;
         now(runoff_continuation(&wallet, "BNB"))?
     });
 
     run!("doge", {
-        let wallet = mock_connection(&BINANCE, true);
+        let wallet = now(mock_connection(&BINANCE, true))?;
         now(runoff_continuation(&wallet, "DOGE"))?
     });
 
     run!("ltc", {
-        let wallet = mock_connection(&BINANCE, true);
+        let wallet = now(mock_connection(&BINANCE, true))?;
         now(runoff_continuation(&wallet, "ltc"))?
     });
 
     run!("link", {
-        let wallet = mock_connection(&BINANCE, true);
+        let wallet = now(mock_connection(&BINANCE, true))?;
         now(runoff_continuation(&wallet, "link"))?
     });
 }

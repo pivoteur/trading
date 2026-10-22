@@ -8,14 +8,14 @@ invocation is independent -- there's nothing to replay.
 
 ## Usage
 
-`$ sendan [--dry-run] [--debug] [--wallet-address <addr>] [--keystore-path <path>] <BLOCKCHAIN> <AMOUNT> <TOKEN> <TO_ADDRESS>`
+`$ sendan [--dry-run] [--debug] [--wallet-address <addr>] [--keystore-path <path>] [--blockchain BLOCKCHAIN] <AMOUNT> <TOKEN> <TO_ADDRESS>`
 
-e.g. `$ sendan avalanche 1100 UNDEAD 0x12345...`
+e.g. `$ sendan 1100 UNDEAD 0x12345...`
 
 where:
 
 * `<BLOCKCHAIN>` selects which chain's token registry to load, from
-  `data/<BLOCKCHAIN>.toml` -- e.g. `avalanche` reads `data/avalanche.toml`.
+  `data/tokens/<BLOCKCHAIN>.toml` -- e.g. `avalanche` reads `data/tokens/avalanche.toml`.
 * `<AMOUNT>` how much to send, e.g. `1100`.
 * `<TOKEN>` the ticker to send, e.g. `UNDEAD` -- must have an entry with a
   real contract address in `data/<BLOCKCHAIN>.toml`. Native coins (no
@@ -62,7 +62,9 @@ send to record.
 
 ## Revisions
 
-* 1.3.1, 2026-10-12: libs refactor and testing
+* 1.3.3, 2026-10-20: `mock_wallet` is now `async`
+* 1.3.1 and 1.3.2, 2026-10-12: libs refactor and testing; `dry_run` now 
+`Execution`
 * 1.3.0, 2026-10-10: sending native tokens now; tested Avalanche and Binance
 * 1.2.1, 2026-10-08: fast-fail on trying to send native tokens (e.g. AVAX),
 (until I implement that functionality)
@@ -75,3 +77,15 @@ send to record.
 * 0.1.0, 2026-08-19: initial version -- one-shot ERC-20 transfer to any
   address, address-shape validation, balance pre-check, append-only send
   log with `WOULD_SEND`/`SENT`/`FAILED` outcomes.
+
+-----
+
+## Verifications
+
+| blockchain | sent   | amt     | received? | protocol token? | date       | tx_id  |
+| :--------- | :----- | ------: | :-------: | :-------------: | :--------- | :----- |
+| Avalanche  | UNDEAD | 1000.00 |      ✅   | 🚫              | 2026-10-20 | [https://snowtrace.io/tx/0x9835...ca6d](https://snowtrace.io/tx/0x983521808ba5d8ab21c86ed57e531a17fc9e994bd4c0e8b1d6a4495258d1ca6d) |
+| Avalanche  | AVAX   | 0.01    |   ✅      | ✅              | 2026-10-20 | [https://snowtrace.io/tx/0x3980...0591](https://snowtrace.io/tx/0x39800d9fd00955a8570f22e09e6eab7d08c4bf25651788d6a1fd395b9a940591) |
+| Binance    | BNB    | 0.01    |   ✅      | ✅              | 2026-10-20 | [https://bscscan.com/tx/0x89a4...740c](https://bscscan.com/tx/0x89a4340126458f299593b4cc36ae2e3dba7be5d59c1adb1bd9a17e5a4e99740c) |
+| Binance    | DOGE   | 10.00   |   ✅      | 🚫              | 2026-10-20 | [https://bscscan.com/tx/0x9e6c...7eac](https://bscscan.com/tx/0x9e6cea7f0ff21dc6bc17248d704a19f85b4b7463263287c52f83ab4b87707eac) |
+

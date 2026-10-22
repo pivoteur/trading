@@ -11,6 +11,11 @@ use ethers::{
 use book::{ debug, err_utils::{ ErrStr, err_or } };
 use libs::types::blockchains::Blockchain;
 
+pub fn api_url(blockchain: &Blockchain) -> String {
+    let base_url = "https://aggregator-api.kyberswap.com";
+    format!("{base_url}/{}/api/v1", blockchain.blockchain())
+}
+
 pub fn f32_2_u128(amount: f32, decimals: i32) -> u128 {
    (amount * 10f32.powi(decimals)).round() as u128
 }

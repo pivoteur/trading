@@ -22,6 +22,7 @@ gelic 0x123abc69 --blockchain binance
 
 ## Revisions
 
+* 1.3.4, 2026-10-20: `mock_wallet` is now `async`
 * 1.3.3, 2026-10-12: libs refactor and testing
 * 1.3.2, 2026-10-11: made libs implementation-work opaque
 * 1.3.1, 2026-10-08: annotated `date` argument

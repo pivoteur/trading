@@ -5,18 +5,23 @@ use chrono::NaiveDate;
 
 use book::{
    debug,
-   not_implemented,
    currency::usd::USD,
    err_utils::ErrStr,
    string_utils::s
 };
 use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
-use super::{ balances::tokens::as_assets, tokens::TokenRegistry };
+use super::{
+   balances::tokens::as_assets,
+   rest::kyber::KyberSwap,
+   tokens::TokenRegistry,
+   trades::Trade
+};
 use crate::implementation::{
    fetchers::wallets::fetch_wallet_balances,
    transactions::{
       quotes::query_quote,
-      senders::send_tokens_to_address
+      senders::send_tokens_to_address,
+      traders::{ check_floor, trade as execute_trade }
    }
 };
 
@@ -45,7 +50,6 @@ pub trait Wallet: Sync {
          format!("{} send {amount:.8} {token} -> {to_address}",
                  self.mode());
       log!("mode {}", log_line);
-      log!("wallet {}", self.wallet_address());
       self.do_send(token, to_address, amount).await
    }
 
@@ -60,8 +64,25 @@ pub trait Wallet: Sync {
       log!("Result from send: {} {}", this, that);
       Ok(())
    }
-   async fn trade(&self) -> ErrStr<()> {
-      not_implemented!("trade")
+   async fn trade(&self, from: &str, amount: f32, to: &str,
+                  min_floor: Option<f32>, slippage: u16) -> ErrStr<Trade> {
+      debug!("trade", self.debug());
+      let swap = format!("{amount} {from} -> {to}{}",
+                         min_floor.and_then(|x| Some(format!(" (min: {x})")))
+                                  .unwrap_or_default());
+      log!("trading {}", swap);
+      let min = min_floor.unwrap_or_default();
+      let query =
+         check_floor(self.blockchain(), self.token_registry(), from, to, amount,                     min, slippage, self.debug()).await?;
+      self.do_trade(from, amount, to, min, slippage, &query).await
+   }
+
+   async fn do_trade(&self, from: &str, amount: f32, to: &str,
+                     min_floor: f32, slippage: u16, swap: &KyberSwap)
+         -> ErrStr<Trade> {
+      execute_trade(self.blockchain(), self.wallet_address(),
+                    self.token_registry(), from, amount, to, min_floor,
+                    slippage, swap, self.keystore_path(), self.debug()).await
    }
    fn blockchain(&self) -> &Blockchain;
    fn token_registry(&self) -> &TokenRegistry;

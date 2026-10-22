@@ -8,7 +8,10 @@ use book::{
 };
 use libs::types::blockchains::{ Blockchain, Blockchain::AVALANCHE };
 use trading::{
-   types::wallets::Wallet,
+   types::{
+      modes::execution::{ Execution, Execution::LIVE },
+      wallets::Wallet
+   },
    wallets::{ factory::connect_wallet, mock::mock_connection }
 };
 
@@ -20,7 +23,7 @@ use trading::{
 /// `sendan avalanche 1100 UNDEAD 0x12345...`. No pivots, no replayed
 /// state: every invocation is a single, independent send.
 #[derive(Debug, Parser)]
-#[command(name = "sendan", version = "1.3.1")]
+#[command(name = "sendan", version = "1.3.3")]
 struct Args {
     /// ERC-20 token symbol to send; must have an address entry in 
     ///the <blockchain>.toml's file. e.g. `UNDEAD`
@@ -46,8 +49,8 @@ struct Args {
     keystore_path: String,
 
     /// Simulate the send without broadcasting a transaction
-    #[arg(long, default_value_t = false)]
-    dry_run: bool,
+    #[arg(long, default_value_t = LIVE)]
+    dry_run: Execution,
 
     /// Print verbose debug logging
     #[arg(short = 'd', long, default_value_t = true)]
@@ -64,11 +67,11 @@ pub async fn runoff_with_args() -> ErrStr<()> {
     let to = &args.to_address;
     let chain = &args.blockchain;
     let debug = args.debug;
-    let wallet = if args.dry_run {
-       mock_connection(chain, debug)
-    } else {
+    let wallet = if args.dry_run == LIVE {
        connect_wallet(chain, &args.wallet_address,
                       &args.keystore_path, debug).await?
+    } else {
+       mock_connection(chain, debug).await?
     };
     runoff_continuation(&wallet, amount, &args.token, to).await
 }
@@ -94,17 +97,20 @@ mod functional_tests {
       utils::now
    };
    use libs::types::{
-      blockchains::Blockchain::AVALANCHE,
+      blockchains::Blockchain::{ AVALANCHE, BINANCE },
       measurable::Measurable
    };
 
+   const AVA: &Blockchain = &AVALANCHE;
+   const BIN: &Blockchain = &BINANCE;
+
    create_testing!("quiz01::c_sendan");
 
-   async fn sender(symbol: &str) -> ErrStr<()> {
-      let wallet = mock_connection(&AVALANCHE, true);
+   async fn sender(blockchain: &Blockchain, symbol: &str) -> ErrStr<()> {
+      let wallet = mock_connection(blockchain, true).await?;
       let yday = &yesterday();
       let balances = wallet.balances(yday).await?;
-      let token = balances.asset((AVALANCHE, symbol));
+      let token = balances.asset((blockchain.clone(), symbol));
       token.ok_or(format!("No {symbol} in wallet"))
            .async_and_then(async |asset| {
          let balance = asset.sz();
@@ -113,6 +119,8 @@ mod functional_tests {
          runoff_continuation(&wallet, amount, symbol, "0x123").await
       }).await
    }
-   run!("send_undead", now(sender("undead"))?);
-   run!("send_avax", now(sender("avax"))?);
+   run!("send_undead", now(sender(AVA, "undead"))?);
+   run!("send_avax", now(sender(AVA, "avax"))?);
+   run!("send_eth", now(sender(BIN, "eth"))?);
+   run!("send_bnb", now(sender(BIN, "bnb"))?);
 }

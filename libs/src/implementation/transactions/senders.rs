@@ -254,4 +254,60 @@ mod tests {
       assert!(ans.is_ok(), "tx should build for Avalanche AVAX {ans:?}");
       Ok(())
    }
+
+    #[tokio::test] async fn fail_send_tokens_zero_amount() -> ErrStr<()> {
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let result = send_tokens_to_address(
+            &AVALANCHE, "0x123", &registry, "UNDEAD",
+            "0x000000000000000000000000000000000000CD", 0.0,
+            "xyz", true).await;
+        assert!(result.is_err(),
+                "a zero amount must never reach the wallet-balance check");
+        Ok(())
+    }
+
+/* TODO: needs a mock-wallet implementation with a token-balance
+   #[tokio::test]
+   async fn fail_send_tokens_insufficient_liquidity() -> ErrStr<()> {
+
+        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
+
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let max_amt0 = fetch_token_balance(&AVALANCHE, TEST_ADDRESS, UNDEAD,
+                                   &registry, true).await?;
+        let max_amt = max_amt0.unwrap_or(0.0);
+        let overflow = max_amt + 10000.0;
+        let result = send_tokens_to_address(
+           &AVALANCHE, TEST_ADDRESS, &registry, "UNDEAD",
+           "0x000000000000000000000000000000000000CD",
+           overflow, "xyz", true).await;
+        assert!(result.is_err(), "Sent too many tokens ({overflow})");
+
+        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
+
+        Ok(())
+   }
+
+// TODO: I need to find a way to test sending native tokens using mocks
+   #[tokio::test] async fn fail_send_native_token() -> ErrStr<()> {
+
+        unsafe { std::env::set_var("KEYSTORE_PASSWORD", "abc"); }
+
+        let registry = fetch_token_registry(&AVALANCHE).await?;
+        let result =
+           send_tokens_to_address(&AVALANCHE, "0xabc", &registry, "avax",
+                   "0x123", 0.01, "xyz", true).await;
+
+        unsafe { std::env::remove_var("KEYSTORE_PASSWORD"); }
+
+        match result {
+           Ok(x) =>
+              Err(format!("Send is okay to send native token (AVAX) {x:?}")),
+           Err(err) => {
+              assert!(err.contains("Native"), "Failed for wrong error: {err}");
+              Ok(())
+           }
+        }
+   }
+*/
 }
