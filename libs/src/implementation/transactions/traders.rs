@@ -4,7 +4,7 @@ use ethers::{
    middleware::SignerMiddleware,
    providers::{ Http, Provider },
    signers::LocalWallet,
-   types::{ Address, Bytes }
+   types::{ Address, Bytes, U256 }
 };
 use serde_json::{ Value, from_str, json };
 
@@ -82,8 +82,8 @@ pub async fn trade(blockchain: &Blockchain, addy: &str,
 
 fn debug_trade_result(tx: Option<&str>, kind: &str, from: &str, to: &str,
                       amount: f32, swap: &KyberSwap, min_floor: f32,
-                      verbose: bool) -> String {
-   debug!("attempt_trade_with_actual_amount", verbose);
+                      debug: bool) -> String {
+   debug!("attempt_trade_with_actual_amount", debug);
    let trade = format!("Trade {from} -> {to}");
    let mb_tx = tx.and_then(|t| Some(format!("tx {t}"))).unwrap_or_default();
    let swap = format!("swap {amount:.4} -> {:.4}", swap.amount_out);
@@ -100,8 +100,8 @@ pub async fn approve_exact_amount(
         token_contract: &str,
         spender: &str,
         amount_base_units: u128,
-        verbose: bool) -> ErrStr<f32> {
-    debug!("approve_exact_amount", verbose);
+        debug: bool) -> ErrStr<f32> {
+    debug!("approve_exact_amount", debug);
 
     let data_hex = format!(
         "0x095ea7b3{}{}",
@@ -112,19 +112,19 @@ pub async fn approve_exact_amount(
     let data = err_or(Bytes::from_str(&data_hex), "Bad approve calldata")?;
     let tx = build_tx_with_fee_buffer(client, to, data, None).await?;
     let (_tx, gas) =
-       complete_transaction(client, tx, "approve", false, verbose).await?;
+       complete_transaction(client, tx, "approve", false, debug).await?;
     Ok(gas)
 }
 
 /// Asks KyberSwap to encode the actual swap calldata for the route.
-/// When `verbose`, prints the raw response so it can be eyeballed before
+/// When `debug`, prints the raw response so it can be eyeballed before
 /// trusting it — otherwise that's a screen-filling blob of hex calldata,
 /// so it stays silent by default. `slippage_bps` is basis points (e.g.
 /// 50 = 0.50%).
 pub async fn kyberswap_build(blockchain: &Blockchain, route_summary_raw: &Value,
-                             sender: &str, slippage_bps: u16, verbose: bool)
+                             sender: &str, slippage_bps: u16, debug: bool)
       -> ErrStr<(String, String)> {
-    debug!("kyberswap_build", verbose);
+    debug!("kyberswap_build", debug);
     let body = json!({
         "routeSummary": route_summary_raw,
         "sender": sender,
@@ -171,26 +171,25 @@ Raw body: {raw_body}"))?;
 /// false success. To see it: snowtrace.io/tx/<tx_hash>
 pub async fn send_swap_tx(
         client: &SignerMiddleware<Provider<Http>, LocalWallet>,
-        router: &str,
-        calldata_hex: &str,
-        verbose: bool) -> ErrStr<(String, f32)> {
+        router: &str, calldata_hex: &str, mb_val: Option<U256>,
+        debug: bool) -> ErrStr<(String, f32)> {
     let to = err_or(Address::from_str(router), "Bad router address")?;
     let data =
          err_or(Bytes::from_str(calldata_hex), "Bad calldata from KyberSwap")?;
-    let tx = build_tx_with_fee_buffer(client, to, data, None).await?;
-    complete_transaction(client, tx, "swap", true, verbose).await
+    let tx = build_tx_with_fee_buffer(client, to, data, mb_val).await?;
+    complete_transaction(client, tx, "swap", true, debug).await
 }
 
 pub async fn execute_trade(blockchain: &Blockchain, addy: &str,
                            registry: &TokenRegistry, from: &str, to: &str,
                            amount: f32, min_floor: f32, slippage_bps: u16,
-                           keystore_path: &str, verbose: bool)
+                           keystore_path: &str, debug: bool)
       -> ErrStr<(String, f32)> {
-    debug!("execute_trade", verbose);
+    debug!("execute_trade", debug);
     log!("Trading in progress — approve/quote/swap. This part takes a minute.");
     log!(">>> Re-checking the quote after keystore unlock (it may have moved)");
     let fresh_quote =
-       query_swap(blockchain, registry, from, to, amount, verbose).await?;
+       query_swap(blockchain, registry, from, to, amount, debug).await?;
     let ratio = fresh_quote.amount_out;
     let trade = format!("{amount:.6} {from} -> {:.8} {to}", ratio);
     log!("Fresh quote: {}", trade);
@@ -211,7 +210,7 @@ That's not happening. No funds used.", ratio,
     } else { 
        execute_trade_continuation(blockchain, addy, keystore_path,
                                   registry, from, amount, fresh_quote,
-                                  slippage_bps, verbose).await
+                                  slippage_bps, debug).await
     }
 }
 
@@ -219,32 +218,36 @@ async fn execute_trade_continuation(blockchain: &Blockchain, addy: &str,
                                     keystore_path: &str,
                                     registry: &TokenRegistry, from: &str,
                                     amount: f32, fresh_quote: KyberSwap,
-                                    slippage_bps: u16, verbose: bool)
+                                    slippage_bps: u16, debug: bool)
       -> ErrStr<(String, f32)> {
-    debug!("execute_trade_continuation", verbose);
+    debug!("execute_trade_continuation", debug);
     let signer = load_signer(blockchain, addy, keystore_path).await?;
     let provider = err_or(Provider::<Http>::try_from(blockchain.url()),
                           "Could not create RPC provider")?;
     let client = SignerMiddleware::new(provider, signer);
     let from_entry = registry.token(from)?;
-    let from_addr = from_entry.address.ok_or(format!("No address for {from}"))?;
     let amount_base =
        (amount * 10f32.powi(from_entry.decimals as i32)).round() as u128;
     log!(">>> Approving exact amount ({:.6} {}) for the router", amount, from);
-    let approve_gas =
-       approve_exact_amount(&client, &from_addr, &fresh_quote.router_address,
-                            amount_base, verbose).await?;
+    let (approve_gas, mb_amt) = if from_entry.native {
+       log!("Native swap; no ERC20 approval needed");
+       (0.0, Some(U256::from(amount_base)))
+    } else {
+       let from_addr =
+          from_entry.address.ok_or(format!("No address for {from}"))?;
+       (approve_exact_amount(&client, &from_addr, &fresh_quote.router_address,
+                            amount_base, debug).await?, None)
+    };
     log!(">>> Requesting swap calldata from KyberSwap...");
     let (router, calldata) =
         kyberswap_build(blockchain, &fresh_quote.route_summary_raw, addy,
-                        slippage_bps, verbose).await?;
+                        slippage_bps, debug).await?;
     log!(">>> Sending swap transaction...");
     let (tx_hash, swap_gas) =
-       send_swap_tx(&client, &router, &calldata, verbose).await?;
+       send_swap_tx(&client, &router, &calldata, mb_amt, debug).await?;
 
     Ok((tx_hash, approve_gas + swap_gas))
 }
-
 
 //============================================================================
 //----- TESTS -------------------------------------------------------------

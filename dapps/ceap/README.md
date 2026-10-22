@@ -40,6 +40,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 
 ## Revision history
 
+* 1.2.3, 2026-10-22: Handle native token swaps in library code
 * 1.2.2, 2026-10-20: show what would be the trade-amounts, even during `DRYRUN`;
 `mock_wallet` is now `async`
 * 1.2.1, 2026-10-12: moved most of libs to implementation-level
@@ -59,6 +60,7 @@ Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
 | blockchain | from   | amt       | to     | received | date       | tx_id   |
 | :--------- | :----- | --------: | :----- | -------: | :-----     | :-----: |
 | Avalanche  | UNDEAD | 70,000.00 | USDC   | 24.37    | 2026-10-21 | [https://snowtrace.io/tx/0x1d83...1061](https://snowtrace.io/tx/0x1d830b179a37ed61c3816aa5cf57d5bd58888071aa14ff3b1b95952e1774106a) |
-| Avalanche  | AVAX   | 0.01      | UNDEAD | n/a      | 2026-10-21 | 🚫 |
+| Avalanche  | AVAX   | 0.01      | UNDEAD | 2662.75  | 2026-10-22 | [https://snowtrace.io/tx/0x8486...5582](https://snowtrace.io/tx/0x8486ecd47658980ab94d1532a7af78d0c7722e666f98a6f14e651c4ad1035582) |
+| Avalanche  | USDC   | 5.00 | AVAX | 0.54 | 2026-10-22 | [https://snowtrace.io/tx/0xe70fb...82cf](https://snowtrace.io/tx/0xe70fb045d9916f409fe6b8ab9c15f2e7b921be94f1503acf639916b10b8282cf) |
 | Binance    | DOGE | 45.00 | USDt   | 3.74    | 2026-10-21 | [https://bscscan.com/tx/0xcd9c...bf1f](https://bscscan.com/tx/0xcd9c1ef96818d2fb023d5c844c892531af8e6b339e13e8c9a790c3663335bf1f)
 | Binance  | BNB   | 0.05 | USDt | n/a      | 2026-10-21 | 🚫 |

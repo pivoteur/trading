@@ -22,7 +22,7 @@ use trading::{
 
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.2.2")]
+#[command(version = "1.2.3")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
