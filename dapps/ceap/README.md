@@ -2,39 +2,73 @@
 
 Trades one token for another on a given blockchain, via KyberSwap.
 
-## Usage
+Usage: ceap [OPTIONS] --wallet-address <WALLET_ADDRESS> --keystore-path <KEYSTORE_PATH> <FROM_TOKEN> <AMOUNT> <TO_TOKEN>
 
-cargo run -- <BLOCKCHAIN> <FROM_TOKEN> <AMOUNT> <TO_TOKEN> [OPTIONS]
+> n.b. if the trade fails, consider setting `--slippage-bps` to 100 (1%)
 
-* [source](../../quizzes/src/quiz02/c_ceap/mod.rs)
+Arguments:
+  <FROM_TOKEN>
+          trading from this token
 
-| Arg | Description |
-|---|---|
-| `BLOCKCHAIN` | Chain name, e.g. `avalanche`, `binance` |
-| `FROM_TOKEN` | Ticker to sell, e.g. `BTC` |
-| `AMOUNT` | Amount of `FROM_TOKEN` to trade |
-| `TO_TOKEN` | Ticker to buy, e.g. `ETH` |
+  <AMOUNT>
+          amount of `from_token` to trade
 
-Flags:
+  <TO_TOKEN>
+          trading to this token
 
-| Flag | Description |
-|---|---|
-| `--live` | Actually execute the trade. Without it, ceap always dry-runs. |
-| `--floor <AMOUNT>` | Minimum acceptable output. Required with `--live`. |
-| `--dry-run` | Force a dry run even if `--live` is also passed. |
-| `-d`, `--debug` | Verbose output. |
+Options:
+      --floor <FLOOR>
+          Minimum acceptable output amount
+          
+          [default: 0]
+
+      --slippage-bps <SLIPPAGE_BPS>
+          Slippage percent (where 1000 BPS is 10% higher than floor)
+          
+          [default: 0]
+
+      --wallet-address <WALLET_ADDRESS>
+          wallet address on which trade occurs
+          
+          [env: WALLET_ADDRESS=]
+
+      --keystore-path <KEYSTORE_PATH>
+          Keystore to wallet: permits trades on this wallet
+          
+          [env: KEYSTORE_PATH]
+
+      --blockchain <BLOCKCHAIN>
+          blockchain on which to execute trade
+          
+          [default: AVALANCHE]
+
+      --dry-run <DRY_RUN>
+          Force a dry run
+          
+          [default: LIVE]
+
+  -d, --debug
+          Show debugging information
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 
 ## Examples
 
-$ cargo run avalanche BTC 1 ETH
-$ cargo run binance BTC 1 USDT --live --floor 63000
+```BASH
+$ ceap BTC 1 ETH
+$ ceap BTC 1 USDT --floor 63000 --blockchain binance
+```
 
 ## Requirements
 
-- `WALLET_ADDRESS` and `TVA_KEYSTORE_PATH` env vars must be set.
-- A `<blockchain>.toml` token registry file must exist alongside the binary, listing each token's address and decimals.
+- A `<blockchain>.toml` token registry file must exist in `data/tokens` in
+this repository
 
-Dry-run by default — nothing moves unless `--live` and `--floor` are both set.
+When `--dry-run` selected  nothing moves
 
 -----
 

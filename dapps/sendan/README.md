@@ -8,14 +8,14 @@ invocation is independent -- there's nothing to replay.
 
 ## Usage
 
-`$ sendan [--dry-run] [--debug] [--wallet-address <addr>] [--keystore-path <path>] <BLOCKCHAIN> <AMOUNT> <TOKEN> <TO_ADDRESS>`
+`$ sendan [--dry-run] [--debug] [--wallet-address <addr>] [--keystore-path <path>] [--blockchain BLOCKCHAIN] <AMOUNT> <TOKEN> <TO_ADDRESS>`
 
-e.g. `$ sendan avalanche 1100 UNDEAD 0x12345...`
+e.g. `$ sendan 1100 UNDEAD 0x12345...`
 
 where:
 
 * `<BLOCKCHAIN>` selects which chain's token registry to load, from
-  `data/<BLOCKCHAIN>.toml` -- e.g. `avalanche` reads `data/avalanche.toml`.
+  `data/tokens/<BLOCKCHAIN>.toml` -- e.g. `avalanche` reads `data/tokens/avalanche.toml`.
 * `<AMOUNT>` how much to send, e.g. `1100`.
 * `<TOKEN>` the ticker to send, e.g. `UNDEAD` -- must have an entry with a
   real contract address in `data/<BLOCKCHAIN>.toml`. Native coins (no
