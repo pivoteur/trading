@@ -10,3 +10,11 @@ impl fmt::Display for Execution {
       write!(f, "{:?}", self)
    }
 }
+
+use Execution::*;
+
+impl From<bool> for Execution {
+   fn from(b: bool) -> Self {
+      if b { DRYRUN } else { LIVE }
+   }
+}
