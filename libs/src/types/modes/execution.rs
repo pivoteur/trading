@@ -2,7 +2,7 @@ use std::fmt;
 use strum::EnumString;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, EnumString)]
-#[strum(serialize_all = "UPPERCASE")]
+#[strum(serialize_all = "UPPERCASE", ascii_case_insensitive)]
 pub enum Execution { DRYRUN, LIVE }
 
 impl fmt::Display for Execution {
