@@ -22,7 +22,7 @@ use trading::{
 
 #[derive(Debug, Parser)]
 #[command(name = "ceap")]
-#[command(version = "1.2.3")]
+#[command(version = "1.2.4")]
 struct Args {
     /// trading from this token
     from_token: UppercaseString,
@@ -54,11 +54,11 @@ struct Args {
     blockchain: Blockchain,
 
     /// Force a dry run
-    #[arg(long, default_value_t = LIVE)]
-    dry_run: Execution,
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
 
     /// Show debugging information
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = false)]
     debug: bool
 }
 
@@ -68,7 +68,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    let floor: f32 = args.floor.into();
    let chain = &args.blockchain;
    let debug = args.debug;
-   let wallet = if args.dry_run == LIVE {
+   let dry_run = Execution::from(args.dry_run);
+   let wallet = if dry_run == LIVE {
       connect_wallet(chain, &args.wallet_address,
                      &args.keystore_path, debug).await?
    } else {

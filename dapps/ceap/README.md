@@ -74,6 +74,7 @@ When `--dry-run` selected  nothing moves
 
 ## Revision history
 
+* 1.2.4, 2026-11-01: `Execution`-mode reified from `bool`
 * 1.2.3, 2026-10-22: Handle native token swaps in library code
 * 1.2.2, 2026-10-20: show what would be the trade-amounts, even during `DRYRUN`;
 `mock_wallet` is now `async`
