@@ -32,14 +32,14 @@ pub async fn query_quote(blockchain: &Blockchain, registry: &TokenRegistry,
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KyberResponse {
-    data: KyberData,
+    data: KyberData
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KyberData {
     router_address: String,
-    route_summary: Value, // Keeps the inner JSON block intact
+    route_summary: Value // Keeps the inner JSON block intact
 }
 
 pub async fn query_swap(
@@ -72,7 +72,7 @@ pub async fn query_swap(
     let agent = format!("{moz} {apple} {chrome} {safari}");
 
     // 3. Chain reqwest methods directly and parse the JSON structurally
-    let res: KyberResponse = http_client()?
+    let sned = http_client()?
         .get(&url)
         .query(&query)
         .header("X-Client-Id", "pivoteur-autotrader")
@@ -80,10 +80,27 @@ pub async fn query_swap(
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("KyberSwap route request failed: {e}"))?
+        .map_err(|e| format!("KyberSwap route request failed: {e}"))?;
+
+/*
         .json() // Automatically handles text/parsing and returns KyberResponse
         .await
         .map_err(|e| format!("Failed to parse Kyber response: {e}"))?;
+*/
+
+
+    // 1. Get raw text so it's not consumed if parsing fails
+    let text = sned.text()
+        .await
+        .map_err(|e| format!("Failed to get text body: {}", e))?;
+
+    // 2. Deserialize explicitly to catch the exact field error location
+    let res: KyberResponse = serde_json::from_str(&text)
+        .map_err(|e| {
+            // This will print line/column and exact field mismatch details!
+            format!("Serde parse error: {}.
+Raw Body chunk: {}", e, &text[..text.len().min(500)])
+        })?;
 
     let dat = res.data;
 

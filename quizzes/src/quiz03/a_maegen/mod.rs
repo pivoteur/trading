@@ -80,9 +80,8 @@ pub async fn runoff_with_args() -> ErrStr<()> {
                         args.dry_run, args.debug).await
 }
 
-async fn runoff_continuation(blockchain: &Blockchain, token: &str, vault: &str,
-                             keystore_path: &str, slippage_bps: u16,
-                             dry_run: bool, debug: bool) -> ErrStr<()> {
+async fn runoff_continuation(wallet: &dyn Wallet, token: &str, vault: &str, slippage_bps: u16,
+                             debug: bool) -> ErrStr<()> {
     debug!("runoff_continuation", debug);
     let mode = if dry_run { "DRY-RUN" } else { "LIVE" };
     log!("mode {} token {}", mode, token);

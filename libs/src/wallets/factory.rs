@@ -7,17 +7,30 @@ use libs::types::blockchains::{
 
 use super::{
    avalanche::mk_connection_to_avalanche,
-   binance::mk_connection_to_binance
+   binance::mk_connection_to_binance,
+   mock::mock_connection
 };
 
 use crate::{
    implementation::fetchers::tokens::fetch_token_registry,
-   types::wallets::Wallet
+   types::{
+      modes::execution::{ Execution, Execution::DRYRUN },
+      wallets::Wallet
+   }
 };
 
-pub async fn connect_wallet(blockchain: &Blockchain,
-                            wallet_address: &str,
-                            keystore_path: &str, debug: bool)
+pub async fn connect_wallet(blockchain: &Blockchain, wallet_address: &str,
+                            keystore_path: &str, debug: bool,
+                            dry_run: Execution) -> ErrStr<Box<dyn Wallet>> {
+   if dry_run == DRYRUN {
+      mock_connection(blockchain, debug).await
+   } else {
+      do_connect_wallet(blockchain, wallet_address, keystore_path, debug).await
+   }
+}
+
+async fn do_connect_wallet(blockchain: &Blockchain, wallet_address: &str,
+                           keystore_path: &str, debug: bool)
       -> ErrStr<Box<dyn Wallet>> {
    let registry = fetch_token_registry(blockchain).await?;
    match blockchain {
@@ -39,16 +52,23 @@ mod functional_tests {
    use super::*;
    use paste::paste;
    use book::{ create_testing, utils::now };
+   use crate::types::modes::execution::Execution::LIVE;
 
    create_testing!("wallets::factory");
 
    run!("connect_avax_wallet", {
-      let wallet = now(connect_wallet(&AVALANCHE, "0x123", "abc", true))?;
+      let wallet = now(connect_wallet(&AVALANCHE, "0x123", "abc", true, LIVE))?;
+      println!("Connected Avalanche wallet:\n\n{wallet}");
+   });
+
+   run!("mock_avax_wallet", {
+      let wallet =
+         now(connect_wallet(&AVALANCHE, "0x123", "abc", true, DRYRUN))?;
       println!("Connected Avalanche wallet:\n\n{wallet}");
    });
 
    run!("connect_binance_wallet", {
-      let wallet = now(connect_wallet(&BINANCE, "0xabc", "xyz", false))?;
+      let wallet = now(connect_wallet(&BINANCE, "0xabc", "xyz", false, LIVE))?;
       println!("Connected Binance wallet:\n\n{wallet}");
    });
 }
@@ -60,7 +80,8 @@ mod tests {
    use libs::types::blockchains::Blockchain::ETHEREUM;
 
    #[tokio::test] async fn fail_connect_to_ethereum() {
-      let wallet = connect_wallet(&ETHEREUM, "0xa1b2c3", "path", true).await;
+      let wallet =
+         connect_wallet(&ETHEREUM, "0xa1b2c3", "path", true, DRYRUN).await;
       assert!(wallet.is_err(), "Should not connect to Ethereum");
    }
 }

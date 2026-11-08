@@ -9,7 +9,8 @@ use book::{
    cli_utils::generate_banner,
    csv_utils::{ parse_items, as_csv },
    err_utils::{ ErrStr, err_or },
-   file_utils::read_file
+   file_utils::read_file,
+   string_utils::UppercaseString
 };
 
 use libs::{
@@ -20,28 +21,43 @@ use libs::{
    wallets::{ factory::connect_wallet, mock::mock_connection }
 };
 
-use trading::types::modes::execution::{ Execution, Execution::LIVE };
+use trading::{
+   types::modes::execution::{ Execution, Execution::LIVE },
+   wallets::factory::connect_wallet
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "dawn")]
 #[command(version = "0.0.1")]
 struct Cli {
    /// primary token
-    primary: String,
+    primary: UppercaseString,
+
    /// token pivoted on
-    pivot: String,
+    pivot: UppercaseString,
+
    /// amount of primary to pivot
     amount: f32,
+
    /// pivot pool wallet address
     #[arg(long)] wallet: String,
+
    /// blockchain of pivot pool
     #[arg(long, default_value_t = AVALANCHE)] blockchain: Blockchain,
+
    /// keystore authorizing trades
     #[arg(long)] keystore_path: String,
+
    /// minimum returned from open-pivot trade
     #[arg(long, default_value_t = 0.0)] floor: f32,
+
+   /// date to run open pivots
+   #[arg(long, env = "LE_DATE")]
+   date: NaiveDate,
+
    /// dry-run or live
     #[arg(long, default_value_t = false)] dry_run: bool,
+
    /// show debugging information
    #[args(short, long, default_value_t = false)] debug: bool
 }
@@ -69,18 +85,14 @@ fn write_csv_table<T: Serialize>(path: &str, records: &[T]) -> ErrStr<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> ErrStr<()> {
+pub async fn runoff_with_args() -> ErrStr<()> {
    let args = parse_args_add_banner!(Cli);
-   let mode = Execution::from(args.dry_run;
+   let mode = Execution::from(args.dry_run);
    let blockchain = &args,blockchain;
-   let wallet_client = if mode == DRYRUN {
-      mock_connection(blockchain, true).await?
-   } else {
-      connect_wallet(args.blockchain, &args.wallet, &args.keystore_path,
-                     false).await?
-   };
-
+   let wallet =
+      connect_wallet(blockchain, &args.wallet, &args.keystore_path,
+                     args.debug, &mode).await?;
+   runoff_continuation(&wallet, &args.pair, &args.date
    let sanitized_pair = args.pair.replace('+', "-").to_lowercase();
     let open_path = format!("data/open-pivots-{}.csv", sanitized_pair);
     let file = read_file(&open_path)?;

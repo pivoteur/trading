@@ -1,0 +1,8 @@
+[target.'cfg(all())']
+rustflags = []
+
+# This automatically forces all 'cargo test' commands to use 1 thread by default
+
+[env]
+RUST_TEST_THREADS = "1"
+
