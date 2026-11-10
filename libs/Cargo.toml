@@ -21,6 +21,7 @@ strum = { version = "0.26", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 book = { path = "../../crypto-n-rust/src/libs/book" }
+swerve = { path = "../../crypto-n-rust/src/pivot/swerve" }
 libs = { path = "../../protocol/libs" } 
 
 ethers = { version = "2.0.14", default-features = false, features = ["rustls"] }

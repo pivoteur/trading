@@ -18,7 +18,8 @@ pub struct TokenEntry {
     pub native:   bool,
     #[serde(default)]
     pub address:  Option<String>,
-    pub decimals: usize
+    pub decimals: usize,
+    pub api_id: String
 }
 
 #[derive(Clone, Debug)]
