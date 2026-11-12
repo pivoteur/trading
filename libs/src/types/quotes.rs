@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use libs::types::quotes::Quotes;
 
-use super::wallet::Wallet;
+use super::{ tokens::TokenRegistry, wallet::Wallet };
 
 use crate::implementation::quotes::query_quotes;
 
@@ -27,4 +27,4 @@ impl ActiveQuotes {
 
 pub fn mk_active_quotes(wallet: &Box<dyn Wallet>) -> ErrStr<ActiveQuotes> {
    let now = NaiveDateTime::now();
-   
+   let registry = wallet.token_registry();

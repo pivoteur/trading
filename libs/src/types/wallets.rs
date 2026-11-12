@@ -73,7 +73,8 @@ pub trait Wallet: Sync {
       log!("trading {}", swap);
       let min = min_floor.unwrap_or_default();
       let query =
-         check_floor(self.blockchain(), self.token_registry(), from, to, amount,                     min, slippage, self.debug()).await?;
+         check_floor(self.blockchain(), self.token_registry(), from, to, amount,
+                     min, slippage, self.debug()).await?;
       self.do_trade(from, amount, to, min, slippage, &query).await
    }
 

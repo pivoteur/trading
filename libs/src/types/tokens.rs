@@ -8,6 +8,10 @@ use book::{
    string_utils::s
 };
 
+use swerve::{ fetch_prices::fetch_prices, types::{ QuoteDict, mk_token } };
+
+use libs::types::quotes::{ Quotes, mk_quotes };
+
 //============================================================================
 //----- Token Registry --------------------------------------------------------
 //============================================================================
@@ -37,6 +41,15 @@ impl TokenRegistry {
                  .ok_or(format!("No entry for {symbol}")).cloned()
    }
    pub fn as_map(&self) -> HashMap<String, TokenEntry> { self.tokens.clone() }
+   fn as_quote_dict(&self) -> QuoteDict {
+      self.tokens.iter()
+          .map(|(tok, entry)| (entry.api_id.to_string(), mk_token(tok)))
+          .collect()
+   }
+   pub async fn fetch_quotes(&self, auth: &str) -> ErrStr<Quotes> {
+      let dict = self.as_quote_dict();
+      let prices = fetch_prices(auth, &dict).await?;
+xxx
 }
 
 impl CsvWriter for TokenRegistry {
