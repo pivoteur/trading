@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
+use chrono::NaiveDate;
+
 use serde::{ Deserialize, Serialize };
 
 use book::{
    csv_utils::{ CsvWriter, CsvHeader, as_csv },
    err_utils::ErrStr,
-   string_utils::s
+   string_utils::s,
+   types::values::Value
 };
 
 use swerve::{ fetch_prices::fetch_prices, types::{ QuoteDict, mk_token } };
@@ -46,10 +49,14 @@ impl TokenRegistry {
           .map(|(tok, entry)| (entry.api_id.to_string(), mk_token(tok)))
           .collect()
    }
-   pub async fn fetch_quotes(&self, auth: &str) -> ErrStr<Quotes> {
+   pub async fn fetch_quotes(&self, auth: &str, date: &NaiveDate)
+         -> ErrStr<Quotes> {
       let dict = self.as_quote_dict();
       let prices = fetch_prices(auth, &dict).await?;
-xxx
+      let quotes: Vec<(&str, f32)> =
+         prices.iter().map(|(tok, qt)| (tok.as_ref(), qt.value())).collect();
+      Ok(mk_quotes(date, &quotes))
+   }
 }
 
 impl CsvWriter for TokenRegistry {
