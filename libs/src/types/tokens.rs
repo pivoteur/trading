@@ -78,3 +78,83 @@ impl CsvWriter for TokenRegistry {
 impl CsvHeader for TokenRegistry {
    fn header(&self) -> String { s("token,native?,address,decimals") }
 }
+
+// ----- TESTS -------------------------------------------------------
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod sample_data {
+   use super::*;
+   use book::{ csv_utils::list_csv, date_utils::yesterday, utils::get_env };
+
+   fn mk_entry<'a>(tok: &'a str, native: bool, api_id: &'a str)
+         -> (&'a str, TokenEntry) {
+      (tok, TokenEntry {
+          native,
+          address: None,
+          decimals: 18,
+          api_id: s(api_id)
+       })
+   }
+   fn mk_registry(toks: &[(&str, TokenEntry)]) -> TokenRegistry {
+      let tokens: HashMap<String, TokenEntry> =
+         toks.iter().map(|(tok, entry)| (s(tok), entry.clone())).collect();
+      mk_token_registry(tokens)
+   }
+   pub fn binance_registry() -> TokenRegistry {
+      mk_registry(&[mk_entry("BNB", true, "binancecoin"),
+                    mk_entry("LTC", false, "litecoin"),
+                    mk_entry("DOGE", false, "dogecoin")])
+   }
+   pub fn avalanche_registry() -> TokenRegistry {
+      mk_registry(&[mk_entry("AVAX", true, "avalanche-2"),
+                    mk_entry("BTC", false, "bitcoin"),
+                    mk_entry("ETH", false, "ethereum"),
+                    mk_entry("UNDEAD", false, "undead-blocks")])
+   }
+   pub async fn quotes_report(blockchain: &str, reg: &TokenRegistry)
+         -> ErrStr<String> {
+      let auth = get_env("COIN_GECKO_API_KEY")?;
+      let quotes = reg.fetch_quotes(&auth, &yesterday()).await?;
+      Ok(format!("{blockchain} quotes:\n\n{}", list_csv(&[quotes], true)))
+   }
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use super::sample_data::*;
+   use paste::paste;
+   use book::{ create_testing, utils::now };
+
+   create_testing!("types::tokens");
+
+   async fn quotes(blockchain: &str, reg: &TokenRegistry) -> ErrStr<()> {
+      println!("{}", quotes_report(blockchain, reg).await?);
+      Ok(())
+   }
+   run!("avalanche_quotes", now(quotes("Avalanche", &avalanche_registry()))?);
+   run!("binance_quotes", now(quotes("Binance", &binance_registry()))?);
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod tests {
+   use super::*;
+   use super::sample_data::*;
+
+   #[tokio::test] async fn test_binance_registry_has_bnb_quote() -> ErrStr<()> {
+      let binance_quotes = quotes_report("Binance", &binance_registry()).await?;
+      assert!(binance_quotes.contains("BNB"));
+      Ok(())
+   }
+
+   #[tokio::test] async fn test_avalanche_registry_has_avax_quote()
+         -> ErrStr<()> {
+      let avalanche_quotes =
+         quotes_report("Avalanche", &avalanche_registry()).await?;
+      assert!(avalanche_quotes.contains("AVAX"));
+      Ok(())
+   }
+}
