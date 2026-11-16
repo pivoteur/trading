@@ -1,12 +1,22 @@
 use std::collections::HashMap;
 
+use chrono::NaiveDate;
+
 use serde::{ Deserialize, Serialize };
 
 use book::{
    csv_utils::{ CsvWriter, CsvHeader, as_csv },
    err_utils::ErrStr,
-   string_utils::s
+   string_utils::s,
+   types::values::Value
 };
+
+use swerve::{
+   fetch_prices::{ fetch_prices, transform_prices },
+   types::{ QuoteDict, mk_token }
+};
+
+use libs::types::quotes::{ Quotes, mk_quotes };
 
 //============================================================================
 //----- Token Registry --------------------------------------------------------
@@ -18,7 +28,8 @@ pub struct TokenEntry {
     pub native:   bool,
     #[serde(default)]
     pub address:  Option<String>,
-    pub decimals: usize
+    pub decimals: usize,
+    pub api_id: String
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +47,24 @@ impl TokenRegistry {
                  .ok_or(format!("No entry for {symbol}")).cloned()
    }
    pub fn as_map(&self) -> HashMap<String, TokenEntry> { self.tokens.clone() }
+   fn as_quote_dict(&self) -> QuoteDict {
+      self.tokens.iter()
+          .map(|(tok, entry)| (entry.api_id.to_string(), mk_token(tok)))
+          .collect()
+   }
+   pub async fn fetch_quotes(&self, auth: &str, date: &NaiveDate)
+         -> ErrStr<Quotes> {
+      let dict = self.as_quote_dict();
+      let raw_prices = fetch_prices(auth, &dict).await?;
+      let prices = transform_prices(&dict, &raw_prices);
+      let quotes: Vec<(String, f32)> =
+         prices.iter()
+               .map(|((_, tok), qt)| (tok.to_string(), qt.value()))
+               .collect();
+      let borrowed_quotes: Vec<(&str, f32)> =
+         quotes.iter().map(|(s, val)| (s.as_ref(), *val)).collect();
+      Ok(mk_quotes(date, &borrowed_quotes))
+   }
 }
 
 impl CsvWriter for TokenRegistry {
@@ -56,4 +85,84 @@ impl CsvWriter for TokenRegistry {
 
 impl CsvHeader for TokenRegistry {
    fn header(&self) -> String { s("token,native?,address,decimals") }
+}
+
+// ----- TESTS -------------------------------------------------------
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod sample_data {
+   use super::*;
+   use book::{ csv_utils::list_csv, date_utils::yesterday, utils::get_env };
+
+   fn mk_entry<'a>(tok: &'a str, native: bool, api_id: &'a str)
+         -> (&'a str, TokenEntry) {
+      (tok, TokenEntry {
+          native,
+          address: None,
+          decimals: 18,
+          api_id: s(api_id)
+       })
+   }
+   fn mk_registry(toks: &[(&str, TokenEntry)]) -> TokenRegistry {
+      let tokens: HashMap<String, TokenEntry> =
+         toks.iter().map(|(tok, entry)| (s(tok), entry.clone())).collect();
+      mk_token_registry(tokens)
+   }
+   pub fn binance_registry() -> TokenRegistry {
+      mk_registry(&[mk_entry("BNB", true, "binancecoin"),
+                    mk_entry("LTC", false, "litecoin"),
+                    mk_entry("DOGE", false, "dogecoin")])
+   }
+   pub fn avalanche_registry() -> TokenRegistry {
+      mk_registry(&[mk_entry("AVAX", true, "avalanche-2"),
+                    mk_entry("BTC", false, "bitcoin"),
+                    mk_entry("ETH", false, "ethereum"),
+                    mk_entry("UNDEAD", false, "undead-blocks")])
+   }
+   pub async fn quotes_report(blockchain: &str, reg: &TokenRegistry)
+         -> ErrStr<String> {
+      let auth = get_env("COIN_GECKO_API_KEY")?;
+      let quotes = reg.fetch_quotes(&auth, &yesterday()).await?;
+      Ok(format!("{blockchain} quotes:\n\n{}", list_csv(&[quotes], true)))
+   }
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod functional_tests {
+   use super::*;
+   use super::sample_data::*;
+   use paste::paste;
+   use book::{ create_testing, utils::now };
+
+   create_testing!("types::tokens");
+
+   async fn quotes(blockchain: &str, reg: &TokenRegistry) -> ErrStr<()> {
+      println!("{}", quotes_report(blockchain, reg).await?);
+      Ok(())
+   }
+   run!("avalanche_quotes", now(quotes("Avalanche", &avalanche_registry()))?);
+   run!("binance_quotes", now(quotes("Binance", &binance_registry()))?);
+}
+
+#[cfg(test)]
+#[cfg(not(tarpaulin_include))]
+mod tests {
+   use super::*;
+   use super::sample_data::*;
+
+   #[tokio::test] async fn test_binance_registry_has_bnb_quote() -> ErrStr<()> {
+      let binance_quotes = quotes_report("Binance", &binance_registry()).await?;
+      assert!(binance_quotes.contains("BNB"));
+      Ok(())
+   }
+
+   #[tokio::test] async fn test_avalanche_registry_has_avax_quote()
+         -> ErrStr<()> {
+      let avalanche_quotes =
+         quotes_report("Avalanche", &avalanche_registry()).await?;
+      assert!(avalanche_quotes.contains("AVAX"));
+      Ok(())
+   }
 }
