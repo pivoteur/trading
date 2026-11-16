@@ -11,7 +11,10 @@ use book::{
    types::values::Value
 };
 
-use swerve::{ fetch_prices::fetch_prices, types::{ QuoteDict, mk_token } };
+use swerve::{
+   fetch_prices::{ fetch_prices, transform_prices },
+   types::{ QuoteDict, mk_token }
+};
 
 use libs::types::quotes::{ Quotes, mk_quotes };
 
@@ -52,10 +55,15 @@ impl TokenRegistry {
    pub async fn fetch_quotes(&self, auth: &str, date: &NaiveDate)
          -> ErrStr<Quotes> {
       let dict = self.as_quote_dict();
-      let prices = fetch_prices(auth, &dict).await?;
-      let quotes: Vec<(&str, f32)> =
-         prices.iter().map(|(tok, qt)| (tok.as_ref(), qt.value())).collect();
-      Ok(mk_quotes(date, &quotes))
+      let raw_prices = fetch_prices(auth, &dict).await?;
+      let prices = transform_prices(&dict, &raw_prices);
+      let quotes: Vec<(String, f32)> =
+         prices.iter()
+               .map(|((_, tok), qt)| (tok.to_string(), qt.value()))
+               .collect();
+      let borrowed_quotes: Vec<(&str, f32)> =
+         quotes.iter().map(|(s, val)| (s.as_ref(), *val)).collect();
+      Ok(mk_quotes(date, &borrowed_quotes))
    }
 }
 

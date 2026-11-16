@@ -4,13 +4,9 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-   implementation::{
-      fetchers::tokens::fetch_token_registry,
-      transactions::quotes::query_quote
-   },
+   implementation::fetchers::tokens::fetch_token_registry,
    types::{
       balances::tokens::{ mk_token_balance, as_assets },
-      rest::kyber::KyberSwap,
       tokens::TokenRegistry,
       trades::{ Trade, Trade::SIMULATED },
       wallets::Wallet
@@ -20,7 +16,7 @@ use crate::{
 use book::{
    debug,
    not_implemented,
-   currency::usd::{ USD, mk_usd },
+   currency::usd::mk_usd,
    err_utils::ErrStr,
    string_utils::s
 };
@@ -41,11 +37,6 @@ pub struct MockWallet {
 
 #[async_trait(?Send)]
 impl Wallet for MockWallet {
-   async fn quote(&self, token: &str) -> ErrStr<USD> {
-      let chain = &self.blockchain;
-      let tokens = fetch_token_registry(chain).await?;
-      query_quote(chain, &tokens, token, self.debug).await
-   }
    async fn balances(&self, date: &NaiveDate) -> ErrStr<Assets> {
       let (token, price) = (self.blockchain.protocol_token(),
             if self.blockchain == AVALANCHE { 11.11 } else { 767.32 });
@@ -62,7 +53,7 @@ impl Wallet for MockWallet {
       Ok(())
    }
    async fn do_trade(&self, _from: &str, _amount: f32, _to: &str,
-                     _min_floor: f32, _slippage: u16, _swap: &KyberSwap)
+                     _min_floor: f32, _slippage: u16, _swap: f32)
          -> ErrStr<Trade> {
       debug!("do_trade", self.debug());
       // do-nothing method
@@ -72,7 +63,7 @@ impl Wallet for MockWallet {
    fn blockchain(&self) -> &Blockchain { &self.blockchain }
    fn keystore_path(&self) -> &str { not_implemented!("keystore_path") }
    fn wallet_address(&self) -> &str { "0xmock_address" }
-   fn debug(&self) -> bool { true }
+   fn debug(&self) -> bool { self.debug }
    fn token_registry(&self) -> &TokenRegistry {
       &self.tokens
    }

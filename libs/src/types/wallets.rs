@@ -5,21 +5,21 @@ use chrono::NaiveDate;
 
 use book::{
    debug,
-   currency::usd::USD,
+   currency::usd::{ USD, mk_usd },
    err_utils::ErrStr,
-   string_utils::s
+   string_utils::s,
+   utils::get_env
 };
 use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
 use super::{
    balances::tokens::as_assets,
-   rest::kyber::KyberSwap,
+   quotes::fetch_active_quotes,
    tokens::TokenRegistry,
    trades::Trade
 };
 use crate::implementation::{
    fetchers::wallets::fetch_wallet_balances,
    transactions::{
-      quotes::query_quote,
       senders::send_tokens_to_address,
       traders::{ check_floor, trade as execute_trade }
    }
@@ -30,7 +30,11 @@ pub trait Wallet: Sync {
    async fn quote(&self, token: &str) -> ErrStr<USD> {
       let chain = self.blockchain();
       let tokens = self.token_registry();
-      query_quote(chain, tokens, token, self.debug()).await
+      let auth = get_env("COIN_GECKO_API_KEY")?;
+      let quotes =
+         fetch_active_quotes(tokens, chain, &auth, self.debug()).await?;
+      let qt = quotes.lookup(token)?;
+      Ok(mk_usd(qt))
    }
 
    async fn balances(&self, date: &NaiveDate) -> ErrStr<Assets> {
@@ -75,11 +79,11 @@ pub trait Wallet: Sync {
       let query =
          check_floor(self.blockchain(), self.token_registry(), from, to, amount,
                      min, slippage, self.debug()).await?;
-      self.do_trade(from, amount, to, min, slippage, &query).await
+      self.do_trade(from, amount, to, min, slippage, query).await
    }
 
    async fn do_trade(&self, from: &str, amount: f32, to: &str,
-                     min_floor: f32, slippage: u16, swap: &KyberSwap)
+                     min_floor: f32, slippage: u16, swap: f32)
          -> ErrStr<Trade> {
       execute_trade(self.blockchain(), self.wallet_address(),
                     self.token_registry(), from, amount, to, min_floor,
