@@ -33,7 +33,6 @@ mod functional_tests {
    use paste::paste;
    use book::{ create_testing, csv_utils::print_csv, utils::now };
    use libs::types::blockchains::Blockchain::*;
-   use crate::implementation::transactions::quotes::query_swap;
 
    create_testing!("libs::tokens");
 
@@ -46,24 +45,6 @@ mod functional_tests {
       let toks = now(fetch_token_registry(&BINANCE))?;
       print_csv(&toks);
    });
-
-   async fn run_query(prim: &str, piv: &str, amt: f32)
-         -> ErrStr<(f32, String)> {
-      let registry = fetch_token_registry(&AVALANCHE).await?;
-      let swap =
-         query_swap(&AVALANCHE, &registry, prim, piv, amt, true).await?;
-      Ok((swap.amount_out, swap.router_address))
-   }
-      
-   run!("live_quote_undead_to_btc", {
-      let (amt, addy) = now(run_query("undead", "btc", 5e5))?;
-      println!("\t500000 UNDEAD -> {amt:.8} BTC right now (router: {addy})");
-   });
-
-    run!("live_quote_btc_to_undead", {
-      let (amt, addy) = now(run_query("btc", "undead", 0.005))?;
-      println!("\t0.005 BTC -> {amt:.4} UNDEAD right now (router: {addy})");
-    });
 }
 
 #[cfg(test)]

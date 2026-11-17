@@ -1,0 +1,5 @@
+[tasks.tests]
+dependencies = ["test", "cleanup"]
+
+[tasks.cleanup]
+script = [ "git add data/quotes/*.json" ]

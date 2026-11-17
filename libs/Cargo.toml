@@ -9,7 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = "0.1"
-chrono = "0.4.38"
+chrono = { version = "0.4.38", features = ["serde"] }
 csv = "1.0"
 paste = "1.0"
 rand = "0.10.2"
@@ -21,6 +21,7 @@ strum = { version = "0.26", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 book = { path = "../../crypto-n-rust/src/libs/book" }
+swerve = { path = "../../crypto-n-rust/src/pivot/swerve" }
 libs = { path = "../../protocol/libs" } 
 
 ethers = { version = "2.0.14", default-features = false, features = ["rustls"] }
@@ -33,3 +34,5 @@ check-cfg = ['cfg(tarpaulin_include)']
 
 [dev-dependencies]
 serial_test = "3.0"
+wiremock = "0.6"
+tempfile = "3.14"

@@ -5,21 +5,22 @@ use serde_json::{ json, Value };
 
 use book::{
    debug,
+   currency::usd::mk_usd,
    err_utils::{ ErrStr, err_or },
    list_utils::async_filter_map,
-   utils::pred
+   utils::{ get_env, pred }
 };
-use libs::types::blockchains::Blockchain;
+use libs::types::{ blockchains::Blockchain, quotes::Quotes };
 
 use crate::{
    implementation::{
       clients::http_client,
       consts::DUST_EPSILON,
-      hex::{ hex_to_u128, pad_address_for_call },
-      transactions::quotes::query_quote
+      hex::{ hex_to_u128, pad_address_for_call }
    },
    types::{
       balances::tokens::{ TokenBalance, mk_token_balance },
+      quotes::fetch_active_quotes,
       tokens::TokenRegistry
    }
 };
@@ -45,7 +46,9 @@ pub async fn fetch_wallet_balances(blockchain: &Blockchain,
        registry.as_map().keys().map(String::to_string).collect();
     let opts = async_filter_map(tf, toks).await?;
     let pairs: Vec<(String, f32)> = opts.into_iter().flatten().collect();
-    let btb = build_token_balance(blockchain, registry, debug);
+    let auth = get_env("COIN_GECKO_API_KEY")?;
+    let quotes = fetch_active_quotes(registry, blockchain, &auth, debug).await?;
+    let btb = build_token_balance(&quotes);
     async_filter_map(btb, pairs).await
 }
 
@@ -59,13 +62,12 @@ fn token_fetcher<'a>(b: &'a Blockchain, a: &'a str, r: &'a TokenRegistry,
    })
 }
 
-fn build_token_balance<'a>(b: &'a Blockchain, r: &'a TokenRegistry,
-                           debug: bool)
+fn build_token_balance<'a>(quotes: &'a Quotes)
       -> impl Fn((String, f32))
       -> Pin<Box<dyn Future<Output=ErrStr<TokenBalance>> + 'a>> {
    move |(tok, bal): (String, f32)| Box::pin(async move {
-      let qt = query_quote(b, &r, &tok, debug).await?;
-      let bal = mk_token_balance(&tok, qt, bal);
+      let qt = quotes.lookup(&tok)?;
+      let bal = mk_token_balance(&tok, mk_usd(qt), bal);
       Ok(bal)
    })
 }

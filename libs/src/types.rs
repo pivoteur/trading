@@ -1,5 +1,6 @@
 pub mod balances;
 pub mod modes;
+pub mod quotes;
 pub mod rest;
 pub mod stats;
 pub mod tokens;
