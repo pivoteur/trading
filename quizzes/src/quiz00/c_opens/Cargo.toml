@@ -1,5 +1,5 @@
 [package]
-name = "a_opens"
+name = "c_opens"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,8 +10,7 @@ trading = { path = "../../../../libs" }
 quizzes = { path = "../../.." }
 
 clap = { version = "4.5", features = ["derive"] }
-tokio    = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
-
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
