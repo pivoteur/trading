@@ -1,21 +1,24 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::{ fs::{OpenOptions, File}, path::Path };
-use chrono::NaiveDate;
+use chrono::{ NaiveDate, NaiveDateTime };
 use uuid::Uuid;
 
 use book::{
+   debug,
    parse_args_add_banner,
    cli_utils::generate_banner,
    csv_utils::{ parse_items, as_csv },
+   date_utils::today;
    err_utils::{ ErrStr, err_or },
    file_utils::read_file,
-   string_utils::UppercaseString
+   string_utils::{ UppercaseString, s }
 };
 
 use libs::{
    types::{
       blockchains::{ Blockchain, Blockchain::AVALANCHE },
+      pools::Pool,
       wallets::Wallet
    },
    wallets::{ factory::connect_wallet, mock::mock_connection }
@@ -64,9 +67,18 @@ struct Cli {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct OpenPivotRow {
-    id: String, wallet_address: String, network: String, pair: String,
-    token_in: String, token_out: String, amount_in: f32, amount_out: f32,
-    timestamp: i64, closed_on: String, tx_id_open: String, tx_id_close: String,
+    id: String,
+    wallet_address: String,
+    network: Blockchain,
+    pair: Pool,
+    token_in: UppercaseString,
+    token_out: UppercaseString,
+    amount_in: f32,
+    amount_out: f32,
+    timestamp: NaiveDateTime,
+    closed_on: String,
+    tx_id_open: String,
+    tx_id_close: String
 }
 
 fn write_csv_table<T: Serialize>(path: &str, records: &[T]) -> ErrStr<()> {
@@ -92,44 +104,63 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    let wallet =
       connect_wallet(blockchain, &args.wallet, &args.keystore_path,
                      args.debug, &mode).await?;
-   runoff_continuation(&wallet, &args.pair, &args.date
-   let sanitized_pair = args.pair.replace('+', "-").to_lowercase();
-    let open_path = format!("data/open-pivots-{}.csv", sanitized_pair);
+   runoff_continuation(&wallet, &args.blockchain, &args.primary,
+                       args.amount, &args.pivot, &args.date, args.debug).await
+}
+
+async runoff_continuation(wallet: &Box<dyn Wallet>, blockchain: &Blockchain,
+                          primary: &str, amount: f32, pivot: &str,
+                          date: &NaiveDate, debug: bool) -> ErrStr<()> {
+    debug!("runoff_continuation", debug);
+    let balances = wallet.balances(date).await?;
+    let pool = balances.pool(blockchain, primary, pivot, debug)?;
+    let open_path = format!("data/open-pivots-{}.csv", pool.file_name());
     let file = read_file(&open_path)?;
-    let mut open_pivots = parse_items::<OpenPivotRow>(&file)?;
-xxx
-    let today = Local::now().naive_local().date();
-    let should_execute_on_chain = args.token_in.to_uppercase() == "UNDEAD";
+    let mut pivots = parse_items::<OpenPivotRow>(&file)?;
 
+    // 3 scenarii, in order:
+    // 1. virtual pivot (let's make the rules for that)
+    // 2. actual pivot (we have enough of primary)
+    // 3. pass (no resources available)
+    
+    let locked: f32 =
+       open_pivots.iter()
+                  .filter(|p| &p.token_out == primary && &p.closed_on == "PENDING")
+            .map(|p| p.amount_out).sum();
+    let should_execute_on_chain = primary == "UNDEAD"
+                               || 
     if should_execute_on_chain {
-        let locked: f32 = open_pivots.iter()
-            .filter(|p| p.token_in == args.token_in && p.closed_on == "PENDING")
-            .map(|p| p.amount_in).sum();
-        
-        let balances = wallet_client.balances(&today).await.map_err(|e| format!("{:?}", e))?;
-        let available_funds = balances.get(&args.token_in).unwrap_or(&0.0) - locked;
-
-        if available_funds >= args.amount_in {
-            println!("🎯 Rule match: UNDEAD input. Executing on-chain trade...");
-            wallet_client.trade().await.map_err(|e| format!("{:?}", e))?;
-            
-            open_pivots.push(OpenPivotRow {
-                id: Uuid::new_v4().to_string(), wallet_address: args.wallet, network: args.network, pair: args.pair,
-                token_in: args.token_in, token_out: args.token_out, amount_in: args.amount_in, amount_out: args.amount_out,
-                timestamp: Utc::now().timestamp(), closed_on: "PENDING".to_string(),
-                tx_id_open: "0xRealOpenTxHash".to_string(), tx_id_close: "PENDING".to_string()
-            });
-        } else { println!("⚠️ [DEBUG REMARK] Insufficient physical UNDEAD balance."); }
+        let available_funds =
+           balances.get(&primary).unwrap_or(&0.0) - locked;
+        if available_funds >= amount {
+            log!("🎯 Rule match: UNDEAD input. Executing on-chain trade...");
+            if let EXECUTED { tx_hash, actual_received } =
+               wallet.trade(primary, amount, pivot, None, 0).await? {
+               open_pivots.push(OpenPivotRow {
+                   id: Uuid::new_v4().to_string(),
+                   wallet_address: wallet.wallet_address(),
+                   network: blockchain,
+                   pair: pool,
+                   token_in: primary,
+                   token_out: pivot,
+                   amount_in: amount,
+                   amount_out: actual_received,
+                   timestamp: Utc::now().timestamp(),
+                   closed_on: s("PENDING"),
+                   tx_id_open: tx_hash,
+                   tx_id_close: s("PENDING")
+               });
+            }
+        } else {
+           log!("⚠️ [DEBUG REMARK] Insufficient physical UNDEAD balance.");
+        }
     } else {
         let locked: f32 = open_pivots.iter()
-            .filter(|p| p.token_out == args.token_out && p.closed_on == "PENDING")
+            .filter(|p| &p.token_out == primary && &p.closed_on == "PENDING")
             .map(|p| p.amount_out).sum();
-        
-        let balances = wallet_client.balances(&today).await.map_err(|e| format!("{:?}", e))?;
-        let available_funds = balances.get(&args.token_out).unwrap_or(&0.0) - locked;
-
-        if available_funds >= args.amount_out {
-            println!("🔮 Rule fallback: Standardizing on a Virtual Pivot (Locking {})...", args.token_out);
+        let available_funds = balances.get(&primary).unwrap_or(&0.0) - locked;
+        if available_funds >= amount {
+            log!("🔮 Rule fallback: attempting a Virtual Pivot (Locking {})...", primary);
             open_pivots.push(OpenPivotRow {
                 id: Uuid::new_v4().to_string(), wallet_address: args.wallet, network: args.network, pair: args.pair,
                 token_in: args.token_in, token_out: args.token_out, amount_in: args.amount_in, amount_out: args.amount_out,
