@@ -93,6 +93,7 @@ impl CsvHeader for TokenRegistry {
 #[cfg(not(tarpaulin_include))]
 mod sample_data {
    use super::*;
+   use crate::consts::COIN_GECKO_API_KEY;
    use book::{ csv_utils::list_csv, date_utils::yesterday, utils::get_env };
 
    fn mk_entry<'a>(tok: &'a str, native: bool, api_id: &'a str)
@@ -122,7 +123,7 @@ mod sample_data {
    }
    pub async fn quotes_report(blockchain: &str, reg: &TokenRegistry)
          -> ErrStr<String> {
-      let auth = get_env("COIN_GECKO_API_KEY")?;
+      let auth = get_env(COIN_GECKO_API_KEY)?;
       let quotes = reg.fetch_quotes(&auth, &yesterday()).await?;
       Ok(format!("{blockchain} quotes:\n\n{}", list_csv(&[quotes], true)))
    }

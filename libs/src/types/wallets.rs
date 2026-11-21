@@ -10,29 +10,32 @@ use book::{
    string_utils::s,
    utils::get_env
 };
-use libs::{ collections::assets::Assets, types::blockchains::Blockchain };
+use libs::{
+   collections::assets::Assets,
+   types::{ blockchains::Blockchain, quotes::Quotes }
+};
 use super::{
    balances::tokens::as_assets,
    quotes::fetch_active_quotes,
    tokens::TokenRegistry,
    trades::Trade
 };
-use crate::implementation::{
-   fetchers::wallets::fetch_wallet_balances,
-   transactions::{
-      senders::send_tokens_to_address,
-      traders::{ check_floor, trade as execute_trade }
+use crate::{
+   consts::COIN_GECKO_API_KEY,
+   implementation::{
+      fetchers::wallets::fetch_wallet_balances,
+      transactions::{
+         senders::send_tokens_to_address,
+         traders::{ check_floor, trade as execute_trade }
+      }
    }
 };
 
 #[async_trait(?Send)]
 pub trait Wallet: Sync {
    async fn quote(&self, token: &str) -> ErrStr<USD> {
-      let chain = self.blockchain();
-      let tokens = self.token_registry();
-      let auth = get_env("COIN_GECKO_API_KEY")?;
-      let quotes =
-         fetch_active_quotes(tokens, chain, &auth, self.debug()).await?;
+      let auth = get_env(COIN_GECKO_API_KEY)?;
+      let quotes = quotes(self, &auth).await?;
       let qt = quotes.lookup(token)?;
       Ok(mk_usd(qt))
    }
@@ -108,3 +111,11 @@ impl fmt::Display for dyn Wallet {
 
 // Each implementation is responsible for their own constructor
 // which then the factory instantiates, parameterized by blockchain
+
+pub async fn quotes<W: Wallet + ?Sized>(wallet: &W, auth: &str)
+      -> ErrStr<Quotes> {
+   let chain = wallet.blockchain();
+   let tokens = wallet.token_registry();
+   let debug = wallet.debug();
+   fetch_active_quotes(tokens, chain, auth, debug).await
+}

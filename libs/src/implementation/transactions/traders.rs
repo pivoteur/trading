@@ -17,20 +17,18 @@ use book::{
    utils::{ get_env, pred }
 };
 use libs::types::blockchains::Blockchain;
-
+use super::utils::{
+   api_url,
+   build_tx_with_fee_buffer,
+   complete_transaction,
+   load_signer
+};
 use crate::{
+   consts::COIN_GECKO_API_KEY,
    implementation::{
       clients::http_client,
       hex::{ pad_address_for_call, pad_u256_for_call },
-      fetchers::wallets::fetch_token_balance,
-      transactions::{
-         utils::{
-            api_url,
-            build_tx_with_fee_buffer,
-            complete_transaction,
-            load_signer
-         }
-      }
+      fetchers::wallets::fetch_token_balance
    },
    types::{
       quotes::fetch_active_quotes,
@@ -50,7 +48,7 @@ fn slippage_adjusted_floor(min_floor: f32, slippage_bps: u16) -> f32 {
 async fn query_swap(blockchain: &Blockchain, registry: &TokenRegistry,
                     from: &str, to: &str, amount: f32, debug: bool)
       -> ErrStr<f32> {
-   let auth = get_env("COIN_GECKO_API_KEY")?;
+   let auth = get_env(COIN_GECKO_API_KEY)?;
    let quotes = fetch_active_quotes(registry, blockchain, &auth, debug).await?;
    let fq = quotes.lookup(from)?;
    let tq = quotes.lookup(to)?;

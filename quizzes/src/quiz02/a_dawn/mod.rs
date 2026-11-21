@@ -11,7 +11,7 @@ use book::{
    csv_utils::{ parse_items, as_csv },
    date_utils::today;
    err_utils::{ ErrStr, err_or },
-   file_utils::read_file,
+   file_utils::lines_from_file,
    string_utils::{ UppercaseString, s }
 };
 
@@ -65,38 +65,6 @@ struct Cli {
    #[args(short, long, default_value_t = false)] debug: bool
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct OpenPivotRow {
-    id: String,
-    wallet_address: String,
-    network: Blockchain,
-    pair: Pool,
-    token_in: UppercaseString,
-    token_out: UppercaseString,
-    amount_in: f32,
-    amount_out: f32,
-    timestamp: NaiveDateTime,
-    closed_on: String,
-    tx_id_open: String,
-    tx_id_close: String
-}
-
-fn write_csv_table<T: Serialize>(path: &str, records: &[T]) -> ErrStr<()> {
-    let file = err_or(OpenOptions::new().write(true)
-                                 .create(true)
-                                 .truncate(true)
-                                 .open(path),
-                      &format!("Could not open file {path}"))?;
-    let mut wtr = csv::Writer::from_writer(file);
-    for (i, record) in records.into_iter().enumerate() {
-       let x = i +1;
-       err_or(wtr.serialize(record),
-              &format!("Could not serialize record {x}"))?;
-    }
-    err_or(wtr.flush(), "Could not flush file")?;
-    Ok(())
-}
-
 pub async fn runoff_with_args() -> ErrStr<()> {
    let args = parse_args_add_banner!(Cli);
    let mode = Execution::from(args.dry_run);
@@ -104,18 +72,22 @@ pub async fn runoff_with_args() -> ErrStr<()> {
    let wallet =
       connect_wallet(blockchain, &args.wallet, &args.keystore_path,
                      args.debug, &mode).await?;
-   runoff_continuation(&wallet, &args.blockchain, &args.primary,
-                       args.amount, &args.pivot, &args.date, args.debug).await
+   let auth = get_env(COIN_GECKO_API_KEY)?;
+   let quotes = quotes(&wallet, &auth).await?;
+   runoff_continuation(&wallet, &quotes, &args.blockchain, &args.date,
+                       &args.primary, args.amount, &args.pivot,
+                       args.debug).await
 }
 
-async runoff_continuation(wallet: &Box<dyn Wallet>, blockchain: &Blockchain,
+async runoff_continuation(wallet: &Box<dyn Wallet>, quotes: &Quotes,
+                          blockchain: &Blockchain, date: &NaiveDate,
                           primary: &str, amount: f32, pivot: &str,
-                          date: &NaiveDate, debug: bool) -> ErrStr<()> {
+                          debug: bool) -> ErrStr<()> {
     debug!("runoff_continuation", debug);
     let balances = wallet.balances(date).await?;
     let pool = balances.pool(blockchain, primary, pivot, debug)?;
-    let open_path = format!("data/open-pivots-{}.csv", pool.file_name());
-    let file = read_file(&open_path)?;
+    let open_path = format!("data/open-pivots-{}.tsv", pool.file_name());
+    let file = lines_from_file(&open_path)?;
     let mut pivots = parse_items::<OpenPivotRow>(&file)?;
 
     // 3 scenarii, in order:
@@ -134,7 +106,7 @@ async runoff_continuation(wallet: &Box<dyn Wallet>, blockchain: &Blockchain,
            balances.get(&primary).unwrap_or(&0.0) - locked;
         if available_funds >= amount {
             log!("🎯 Rule match: UNDEAD input. Executing on-chain trade...");
-            if let EXECUTED { tx_hash, actual_received } =
+            if let EXECUTED { tx_hash, actual_received, gas_avax } =
                wallet.trade(primary, amount, pivot, None, 0).await? {
                open_pivots.push(OpenPivotRow {
                    id: Uuid::new_v4().to_string(),

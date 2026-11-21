@@ -13,6 +13,7 @@ use book::{
 use libs::types::{ blockchains::Blockchain, quotes::Quotes };
 
 use crate::{
+   consts::COIN_GECKO_API_KEY,
    implementation::{
       clients::http_client,
       consts::DUST_EPSILON,
@@ -46,7 +47,7 @@ pub async fn fetch_wallet_balances(blockchain: &Blockchain,
        registry.as_map().keys().map(String::to_string).collect();
     let opts = async_filter_map(tf, toks).await?;
     let pairs: Vec<(String, f32)> = opts.into_iter().flatten().collect();
-    let auth = get_env("COIN_GECKO_API_KEY")?;
+    let auth = get_env(COIN_GECKO_API_KEY)?;
     let quotes = fetch_active_quotes(registry, blockchain, &auth, debug).await?;
     let btb = build_token_balance(&quotes);
     async_filter_map(btb, pairs).await
